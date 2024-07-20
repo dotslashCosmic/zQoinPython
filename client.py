@@ -177,7 +177,7 @@ class BlockchainGUI:
             # Prepare the data to mine
             data = f"{previous_hash}{transactions_data}"
             start_time = time.time()
-            result = hashlib.sha3_256(data.encode()).hexdigest()
+            result = hashlib.sha3_512(data.encode()).hexdigest()
 
 
             time.sleep(0.1)  # Increased delay to slow down mining process
