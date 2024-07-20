@@ -86,11 +86,6 @@ class BlockchainGUI:
         self.sender_wallet_entry.config(state='readonly')
         self.new_wallet_button = tk.Button(root, text="Create New Wallet", command=self.create_new_wallet)
         self.new_wallet_button.pack(pady=10)
-        self.mining_wallet_label = tk.Label(root, text="Mining Wallet Address:")
-        self.mining_wallet_label.pack(pady=10)
-        self.mining_wallet_entry = tk.Entry(root)
-        self.mining_wallet_entry.pack(pady=10)
-        self.mining_wallet_entry.insert(0, self.wallet.public_key)
         self.mine_button = tk.Button(root, text="Mine", command=self.start_mining)
         self.mine_button.pack(pady=10)
         self.hash_rate_label = tk.Label(root, text="Hash Rate: 0 H/s")
@@ -150,8 +145,6 @@ class BlockchainGUI:
 
     def mine(self):
         while self.mining:
-
-            # Fetch the latest block from the host
             response = requests.get('http://127.0.0.1:5000/blocks')
             if response.status_code == 200:
                 blocks = response.json()
@@ -160,8 +153,6 @@ class BlockchainGUI:
             else:
                 print("Failed to fetch the latest block.")
                 return
-
-            # Fetch all previous transactions from the host
             response = requests.get('http://127.0.0.1:5000/transactions')
             if response.status_code == 200:
                 transactions = response.json()
@@ -169,54 +160,37 @@ class BlockchainGUI:
             else:
                 print("Failed to fetch previous transactions.")
                 return
-
-            # Set the difficulty target
-            difficulty = 4
-            target = '0' * difficulty
-
-            # Prepare the data to mine
+            difficulty = 5000000000
+            target = '1' * int(difficulty * 1.00001)
             data = f"{previous_hash}{transactions_data}"
             start_time = time.time()
             result = hashlib.sha3_512(data.encode()).hexdigest()
-
-
-            time.sleep(0.1)  # Increased delay to slow down mining process
+            time.sleep(0.01)
             end_time = time.time()
             time_diff = end_time - start_time
             if time_diff == 0:
-                self.hash_rate = float('inf')  # Handle zero time difference
+                self.hash_rate = float('inf')
             else:
                 self.hash_rate = 1 / time_diff
-
-            # Send the mined block to the host
             block_data = {
                 'data': data,
                 'hash': result,
                 'hash_rate': self.hash_rate
             }
-
             response = requests.post('http://127.0.0.1:5000/add_block', json=block_data)
             if response.status_code == 200:
                 print("Block successfully added to the blockchain.")
+#TODO -Send the reward of 1 zQoin to the mining wallet for mining a block
+                receiver =  self.wallet.public_key
+                amount = '1'
+                transaction = create_transaction('zqnMININGPOOL', receiver, str(amount))
+#                wallet_address = self.mining_wallet_entry.get()
+#                result = mine_block(transaction, wallet_address)
+#                messagebox.showinfo("Mining Result", result)
             else:
                 print("Failed to add block to the blockchain.")
             print(f"Mined data: {result}")
-            time.sleep(1)
-        sender = self.sender_wallet_entry.get()
-        receiver = self.receiver_wallet_entry.get()
-        amount = self.amount_entry.get()
-        if not sender or not receiver or not amount:
-            messagebox.showerror("Input Error", "All fields are required.")
-            return
-        try:
-            amount = float(amount)
-        except ValueError:
-            messagebox.showerror("Input Error", "Amount must be a valid number.")
-            return
-        transaction = create_transaction(sender, receiver, str(amount))
-        wallet_address = self.mining_wallet_entry.get()
-        result = mine_block(transaction, wallet_address)
-        messagebox.showinfo("Mining Result", result)
+            time.sleep(0.01)
 
         def mine():
             start_time = time.time()
@@ -224,12 +198,11 @@ class BlockchainGUI:
             while self.mining:
                 data = "Some data to mine, algorithms and such"
                 result = mine_block(data, self.wallet.public_key)
-                time.sleep(0.1)
+                time.sleep(0.01)
                 end_time = time.time()
                 print(end_time)
                 self.hash_rate = 1 / (end_time - start_time)
                 print(result)
-                time.sleep(1)
         threading.Thread(target=mine).start()
         
     def update_hash_rate(self):
@@ -240,4 +213,3 @@ if __name__ == '__main__':
     root = tk.Tk()
     gui = BlockchainGUI(root)
     root.mainloop()
-
