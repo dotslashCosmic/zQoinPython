@@ -28,8 +28,19 @@ class Blockchain:
         self.load_chain()
 
     def save_chain(self):
+
         with open('blockchain.json', 'w') as f:
-            chain_data = [block.__dict__ for block in self.chain]
+            chain_data = []
+            seen_indexes = set()
+            for block in self.chain:
+                if block.index not in seen_indexes:
+                    block_data = {
+                        "index": block.index,
+                        "timestamp": block.timestamp,
+                        "hash": block.hash
+                    }
+                    chain_data.append(block_data)
+                    seen_indexes.add(block.index)
             json.dump({'chain': chain_data, 'balances': self.balances}, f)
 
     def load_chain(self):
@@ -40,7 +51,7 @@ class Blockchain:
                 self.balances = data['balances']
         except FileNotFoundError:
             self.chain.append(create_genesis_block())
-            self.balances["0"] = 0  # Initial balance for genesis block
+            self.balances["0"] = 0
 
     def get_latest_block(self):
         return self.chain[-1]
@@ -61,7 +72,7 @@ class Blockchain:
         sender = transaction['sender']
         receiver = transaction['receiver']
         amount = float(transaction['amount'])
-        if sender != "0":  # Genesis block or mining reward
+        if sender != "0":
             if sender not in self.balances:
                 self.balances[sender] = 0
             self.balances[sender] -= amount
@@ -70,23 +81,23 @@ class Blockchain:
         self.balances[receiver] += amount
         if miner_address not in self.balances:
             self.balances[miner_address] = 0
-        self.balances[miner_address] += 1  # Mining reward
+        self.balances[miner_address] += 1
 
 app = Flask(__name__)
 blockchain = Blockchain()
 @app.route('/blocks', methods=['GET'])
 def get_blocks():
     chain_data = []
+    seen_hashes = set()
     for block in blockchain.chain:
-        chain_data.append({
-            "index": block.index,
-            "previous_hash": block.previous_hash,
-            "timestamp": block.timestamp,
-            "data": block.data,
-            "hash": block.hash
-        })
+        if block.hash not in seen_hashes:
+            chain_data.append({
+                "index": block.index,
+                "timestamp": block.timestamp,
+                "hash": block.hash
+            })
+            seen_hashes.add(block.hash)
     return jsonify(chain_data)
-
 
 @app.route('/transactions', methods=['GET'])
 def get_transactions():
@@ -95,17 +106,13 @@ def get_transactions():
         transactions.append(block.data)
     return jsonify(transactions)
 
-
 @app.route('/add_block', methods=['POST'])
 def add_block():
-
     block_data = request.json
     print("Received block data:", block_data)
     data = block_data['data']
     hash = block_data['hash']
     hash_rate = block_data['hash_rate']
-    
-    # Create a new block and add it to the blockchain
     previous_block = blockchain.get_latest_block()
     index = previous_block.index + 1
     timestamp = int(time.time())
@@ -113,7 +120,6 @@ def add_block():
     new_block = Block(index, previous_hash, timestamp, hashlib.sha3_512(data.encode('utf-8')).hexdigest(), hash)
     blockchain.chain.append(new_block)
     blockchain.save_chain()
-    
     return jsonify({"message": "Block added successfully!"})
 
 if __name__ == '__main__':
