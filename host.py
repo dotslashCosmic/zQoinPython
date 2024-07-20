@@ -110,54 +110,7 @@ def add_block():
     index = previous_block.index + 1
     timestamp = int(time.time())
     previous_hash = previous_block.hash
-    new_block = Block(index, previous_hash, timestamp, hashlib.sha256(data.encode('utf-8')).hexdigest(), hash)
-    blockchain.chain.append(new_block)
-    blockchain.save_chain()
-    
-    return jsonify({"message": "Block added successfully!"})
-
-if __name__ == '__main__':
-    app.run(port=5000)
-
-app = Flask(__name__)
-blockchain = Blockchain()
-@app.route('/blocks', methods=['GET'])
-def get_blocks():
-    chain_data = []
-    for block in blockchain.chain:
-        chain_data.append({
-            "index": block.index,
-            "previous_hash": block.previous_hash,
-            "timestamp": block.timestamp,
-            "data": block.data,
-            "hash": block.hash
-        })
-    return jsonify(chain_data)
-
-
-@app.route('/transactions', methods=['GET'])
-def get_transactions():
-    transactions = []
-    for block in blockchain.chain:
-        transactions.append(block.data)
-    return jsonify(transactions)
-
-
-@app.route('/add_block', methods=['POST'])
-def add_block():
-
-    block_data = request.json
-    print("Received block data:", block_data)
-    data = block_data['data']
-    hash = block_data['hash']
-    hash_rate = block_data['hash_rate']
-    
-    # Create a new block and add it to the blockchain
-    previous_block = blockchain.get_latest_block()
-    index = previous_block.index + 1
-    timestamp = int(time.time())
-    previous_hash = previous_block.hash
-    new_block = Block(index, previous_hash, timestamp, hashlib.sha256(data.encode('utf-8')).hexdigest(), hash)
+    new_block = Block(index, previous_hash, timestamp, hashlib.sha3_512(data.encode('utf-8')).hexdigest(), hash)
     blockchain.chain.append(new_block)
     blockchain.save_chain()
     
