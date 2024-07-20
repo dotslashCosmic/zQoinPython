@@ -37,17 +37,31 @@ class Wallet:
             self.private_key = keys['private_key']
             self.public_key = keys['public_key']
 
-def create_transaction(sender, receiver, amount):
+def create_transaction(sender, receiver, amount, private_key):
     transaction = {
         'sender': sender,
         'receiver': receiver,
         'amount': amount
     }
+    transaction['signature'] = sign_transaction(transaction, private_key)
     return transaction
+
+def sign_transaction(transaction, private_key):
+    transaction_string = json.dumps(transaction, sort_keys=True)
+    return hashlib.sha3_512((transaction_string + private_key).encode('utf-8')).hexdigest()
+
+def submit_transaction(transaction):
+    url = 'http://localhost:5000/transactions'
+    response = requests.post(url, json=transaction)
+    return response.json()
+
+def get_blockchain_state():
+    url = 'http://localhost:5000/blocks'
+    response = requests.get(url)
+    return response.json()
 
 def mine_block(transaction, wallet_address):
     url = 'http://localhost:5000/mine'
-
     payload = {
         'transaction': {
             'sender': transaction['sender'],
@@ -59,12 +73,18 @@ def mine_block(transaction, wallet_address):
     response = requests.post(url, json=payload)
     return response.json()
 
+def get_difficulty_and_target():
+    difficulty = 6000000000
+    target = '0' * difficulty
+    return difficulty, target
+
 class BlockchainGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Blockchain GUI")
         self.mining = False
         self.hash_rate = 0
+        self.difficulty2 = 1
         if os.path.exists('wallet.json'):
             with open('wallet.json', 'r') as f:
                 keys = json.load(f)[0]
@@ -86,18 +106,40 @@ class BlockchainGUI:
         self.sender_wallet_entry.config(state='readonly')
         self.new_wallet_button = tk.Button(root, text="Create New Wallet", command=self.create_new_wallet)
         self.new_wallet_button.pack(pady=10)
+        self.create_transaction_button = tk.Button(root, text="Create Transaction", command=self.create_transaction)
+        self.create_transaction_button.pack(pady=10)
+        self.submit_transaction_button = tk.Button(root, text="Submit Transaction", command=self.submit_transaction)
+        self.submit_transaction_button.pack(pady=10)
         self.mine_button = tk.Button(root, text="Mine", command=self.start_mining)
         self.mine_button.pack(pady=10)
         self.hash_rate_label = tk.Label(root, text="Hash Rate: 0 H/s")
         self.hash_rate_label.pack(pady=10)
         self.update_hash_rate()
+
+    def create_transaction(self):
+        receiver = self.receiver_wallet_entry.get()
+        amount = self.amount_entry.get()
+        transaction = create_transaction(self.wallet.public_key, receiver, amount, self.wallet.private_key)
+        self.transaction = transaction
+        self.transaction_status_label.config(text="Transaction Created")
+
+    def submit_transaction(self):
+        if hasattr(self, 'transaction'):
+            response = submit_transaction(self.transaction)
+            self.transaction_status_label.config(text="Transaction Submitted")
+        else:
+            self.transaction_status_label.config(text="No Transaction to Submit")
         self.receiver_wallet_label = tk.Label(root, text="Receiver Wallet Address:")
         self.receiver_wallet_label.pack(pady=10)
         self.receiver_wallet_entry = tk.Entry(root)
         self.receiver_wallet_entry.pack(pady=10)
         self.amount_label = tk.Label(root, text="Amount:")
         self.amount_label.pack(pady=10)
+
         self.amount_entry = tk.Entry(root)
+        self.amount_entry.pack(pady=10)
+        self.transaction_status_label = tk.Label(root, text="")
+        self.transaction_status_label.pack(pady=10)
         self.amount_entry.pack(pady=10)
         self.send_button = tk.Button(root, text="Send", command=self.send_transaction)
         self.send_button.pack(pady=10)
@@ -144,11 +186,17 @@ class BlockchainGUI:
         messagebox.showinfo("Mining Result", result)
 
     def mine(self):
+        index = 0
         while self.mining:
+            if index >= 10000000000:
+                print("Reached the maximum limit of 50 million zQoin in circulation. Stopping mining.")
+                self.mining = False
+                break
             response = requests.get('http://127.0.0.1:5000/blocks')
             if response.status_code == 200:
                 blocks = response.json()
                 previous_block = blocks[-1]
+                previous_index = previous_block['index']
                 previous_hash = previous_block['hash']
             else:
                 print("Failed to fetch the latest block.")
@@ -160,12 +208,15 @@ class BlockchainGUI:
             else:
                 print("Failed to fetch previous transactions.")
                 return
-            difficulty = 5000000000
-            target = '1' * int(difficulty * 1.00001)
+            difficulty = 6000000000 + (previous_index * 80) #Max of 50 million zQoins
+            additional_difficulty = (previous_index // 10) * 100
+            exponential_difficulty = int(((previous_index // 15) * 2) ** 1.01) 
+            difficulty = difficulty + additional_difficulty + exponential_difficulty
+            target = '0' * difficulty
             data = f"{previous_hash}{transactions_data}"
             start_time = time.time()
             result = hashlib.sha3_512(data.encode()).hexdigest()
-            time.sleep(0.01)
+            time.sleep(0.001)
             end_time = time.time()
             time_diff = end_time - start_time
             if time_diff == 0:
@@ -179,26 +230,26 @@ class BlockchainGUI:
             }
             response = requests.post('http://127.0.0.1:5000/add_block', json=block_data)
             if response.status_code == 200:
+                print("Current Difficulty:", difficulty)
                 print("Block successfully added to the blockchain.")
-#TODO -Send the reward of 1 zQoin to the mining wallet for mining a block
+                #TODO -Send the reward of 1 zQoin to the mining wallet for mining a block
                 receiver =  self.wallet.public_key
-                amount = '1'
-                transaction = create_transaction('zqnMININGPOOL', receiver, str(amount))
+                transaction = create_transaction('zqnMININGREWARDMININGREWARDMININGREWARDMININGREWARDMININGREWARD0', receiver, '1', self.wallet.private_key)
 #                wallet_address = self.mining_wallet_entry.get()
 #                result = mine_block(transaction, wallet_address)
 #                messagebox.showinfo("Mining Result", result)
             else:
                 print("Failed to add block to the blockchain.")
             print(f"Mined data: {result}")
-            time.sleep(0.01)
+            index += 1
 
         def mine():
             start_time = time.time()
             print(start_time)
             while self.mining:
-                data = "Some data to mine, algorithms and such"
+                data = "GENESISzQoinGENESIS"
                 result = mine_block(data, self.wallet.public_key)
-                time.sleep(0.01)
+                time.sleep(0.001)
                 end_time = time.time()
                 print(end_time)
                 self.hash_rate = 1 / (end_time - start_time)
