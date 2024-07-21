@@ -1,6 +1,6 @@
 import hashlib, time, json
 from flask import Flask, jsonify, request
-from client import BlockchainGUI, get_difficulty_and_target
+from client import BlockchainGUI 
 
 class Block:
     def __init__(self, index, previous_hash, timestamp, data, hash, nonce):
@@ -29,7 +29,7 @@ class Blockchain:
     def __init__(self):
         self.chain = []
         self.balances = {}
-        self.difficulty, self.target = get_difficulty_and_target()
+        self.difficulty, self.target = self.get_difficulty_and_target()
         self.load_chain()
         self.transaction_pool = []
 
@@ -61,13 +61,32 @@ class Blockchain:
         except FileNotFoundError:
             self.chain.append(create_genesis_block())
             self.balances["0"] = 0
-
+            
+    def get_difficulty_and_target(self):
+        if self.chain:
+            index = self.chain[-1].index
+            print("Blockchain index:", index)
+        else:
+            index = 0
+        base = 1000000000
+        a = 100
+        b = 23
+        c = 7
+        d = 4
+        base_difficulty = base + (index * a)
+        additional_difficulty = ((index // b) + 10) * 1000
+        exponential_difficulty = int((index // c) ** d)
+        difficulty = base_difficulty + additional_difficulty + exponential_difficulty
+        print("Next block difficulty:", difficulty)
+        target = '0' * difficulty
+        return difficulty, target
+        
     def get_latest_block(self):
         return self.chain[-1]
 
     def proof_of_work(self, index, previous_hash, timestamp, data):
         nonce = 53100
-        difficulty = 700000000
+        difficulty, _ = self.get_difficulty_and_target()
         while True:
             hash = calculate_hash(index, previous_hash, timestamp, data, nonce)
             if hash[:difficulty] == '0' * difficulty:
@@ -104,9 +123,15 @@ class Blockchain:
         self.balances[miner_address] += 1
 
 app = Flask(__name__)
+
 print("Loading Blockchain...")
 blockchain = Blockchain()
 print("Blockchain initialized.\nInitializing zQoin Node...")
+
+@app.route('/difficulty', methods=['GET'])
+def get_difficulty():
+    difficulty, target = blockchain.get_difficulty_and_target()
+    return jsonify({'difficulty': difficulty, 'target': target})
 
 @app.route('/transactions', methods=['POST'])
 def add_transaction():
@@ -114,8 +139,8 @@ def add_transaction():
     blockchain.transaction_pool.append(transaction)
     return jsonify(transaction), 201
 
-@app.route('/mine', methods=['POST'])
-def mine_block():
+@app.route('/send_transaction', methods=['POST'])
+def send_transaction():
     miner_address = request.get_json().get('miner_address')
     blockchain.add_block(miner_address)
     return jsonify(blockchain.get_latest_block().__dict__), 201
@@ -161,4 +186,4 @@ def add_block():
 
 if __name__ == '__main__':
     print("zQoin Node Initialized.")
-    app.run(port=5000)
+    app.run(port=5310)
