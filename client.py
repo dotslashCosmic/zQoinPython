@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import simpledialog
 from tkinter import messagebox
+from datetime import datetime
 import threading, time, requests, json, hashlib, os
 
 localip = 'http://127.0.0.1:5310'
@@ -104,7 +105,7 @@ class BlockchainGUI:
                 return
             self.wallet = Wallet(nickname)
             self.wallet.save_keys()
-        self.sender_wallet_label = tk.Label(root, text=f"Current Wallet: {self.wallet.nickname}")
+        self.sender_wallet_label = tk.Label(root, text=f"Welcome to zQoin Client\nCurrent Wallet: {self.wallet.nickname}\nAmount: {self.wallet.amount} zQoin\n\t\t\t\t\t\t")
         self.sender_wallet_label.pack(pady=10)
         self.sender_wallet_entry = tk.Entry(root)
         self.sender_wallet_entry.pack(pady=10)
@@ -161,18 +162,20 @@ class BlockchainGUI:
         self.mining_wallet_entry.insert(0, self.wallet.public_key)
         self.mining = not self.mining
         if self.mining:
-            self.start_button.config(text="Stop Mining")
+            self.start_button.config(text="---Stop Mining---")
             self.start_mining()
         else:
-            self.start_button.config(text="Start Mining")
+            self.start_button.config(text="Mine")
 
     def start_mining(self):
         self.mining = True
-        self.mine_button.config(text="Stop Mining", command=self.stop_mining)
+        self.mine_button.config(text="---Stop Mining---", command=self.stop_mining)
+        print("Mining starting...")
         threading.Thread(target=self.mine).start()
 
     def stop_mining(self):
         self.mining = False
+        print("Mining stopped.")
         self.mine_button.config(text="Mine", command=self.start_mining)
 
     def send_transaction(self):
@@ -193,11 +196,19 @@ class BlockchainGUI:
     def mine(self):
         index = 0
         while self.mining:
-            if index >= 10000000000:
-                print("Reached the maximum limit of 10,013,232 zQoin in circulation. Stopping mining.")
-                self.mining = False
+            response = requests.get(localip + '/difficulty')
+            if response.status_code == 200:
+                difficulty_response = response.json()
+                difficulty = difficulty_response['difficulty']
+                target = difficulty_response['target']
+                max_base = difficulty_response['max_base']
+            else:
+                print("Failed to fetch difficulty.")
+                return
+            if index >= max_base:
+                print("Reached the maximum limit of zQoin in circulation. Stopping mining.")
                 break
-            response = requests.get(localip + '/blocks')
+            response = requests.get(f"{localip}/blocks")
             if response.status_code == 200:
                 blocks = response.json()
                 previous_block = blocks[-1]
@@ -213,14 +224,6 @@ class BlockchainGUI:
             else:
                 print("Failed to fetch previous transactions.")
                 return
-            response = requests.get(localip + '/difficulty')
-            if response.status_code == 200:
-                difficulty_response = response.json()
-                difficulty = difficulty_response['difficulty']
-                target = difficulty_response['target']
-            else:
-                print("Failed to fetch difficulty.")
-                return
             data = f"{previous_hash}{transactions_data}"
             start_time = time.time()
             result = hashlib.sha3_512(data.encode()).hexdigest()
@@ -235,12 +238,20 @@ class BlockchainGUI:
                 self.hash_rate = 1 / time_diff
             block_data = {
                 'data': data,
+            }
+            first_hash = block_data['data'].split('[')[0].strip()
+            data_part = block_data['data'].split('[')[1].strip(']')
+            hashes = [hash.strip().strip('"') for hash in data_part.split(',')]
+            last_10_hashes = first_hash+str(hashes[-10:])
+            block_data = {
+                'data': last_10_hashes,
                 'hash': result,
                 'hash_rate': self.hash_rate
             }
             response = requests.post(localip + '/add_block', json=block_data)
             if response.status_code == 200:
-                print("Block", int(index+1), "successfully added to the blockchain at difficulty", difficulty)
+                block_time = datetime.fromtimestamp(int(end_time)).strftime('%m/%d/%Y %H:%M:%S')
+                print("Block successfully added to the blockchain at difficulty", difficulty, "\nBlock mine time:", block_time)
 #TODO Send the reward of 1 zQoin to the mining wallet(after server verification) for mining a block
                 receiver =  self.wallet.public_key
                 transaction = create_transaction('zqnMININGREWARDMININGREWARDMININGREWARDMININGREWARDMININGREWARD0', receiver, '1', self.wallet.private_key)
@@ -249,18 +260,21 @@ class BlockchainGUI:
 #                messagebox.showinfo("Mining Result", result)
             else:
                 print("Failed to add block to the blockchain.")
+                BlockchainGUI.stop_mining()
             print(f"Mined data: {result}")
             index += 1
 
         def mine():
             start_time = time.time()
-            print(start_time)
             while self.mining:
                 data = "GENESISzQoinGENESIS"
                 result = send_transaction(data, self.wallet.public_key)
                 end_time = time.time()
-                print(end_time)
-                self.hash_rate = 1 / (end_time - start_time)
+                time_diff = end_time - start_time
+                if time_diff == 0:
+                    self.hash_rate = float('inf')
+                else:
+                    self.hash_rate = 1 / (end_time - start_time)
                 print(result)
         threading.Thread(target=mine).start()
         
