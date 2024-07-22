@@ -250,14 +250,18 @@ class BlockchainGUI:
             }
             response = requests.post(localip + '/add_block', json=block_data)
             if response.status_code == 200:
+#TODO Add mining pool server side, for now adding 1 directly to wallet.json
+                with open('wallet.json', 'r') as file:
+                    data = json.load(file)
+                public_key = self.wallet.public_key
+                for entry in data:
+                    if entry['public_key'] == public_key:
+                        entry['amount'] += 1
+                        break
+                with open('wallet.json', 'w') as file:
+                    json.dump(data, file, indent=4)
                 block_time = datetime.fromtimestamp(int(end_time)).strftime('%m/%d/%Y %H:%M:%S')
-                print("Block successfully added to the blockchain at difficulty", difficulty, "\nBlock mine time:", block_time)
-#TODO Send the reward of 1 zQoin to the mining wallet(after server verification) for mining a block
-                receiver =  self.wallet.public_key
-                transaction = create_transaction('zqnMININGREWARDMININGREWARDMININGREWARDMININGREWARDMININGREWARD0', receiver, '1', self.wallet.private_key)
-#                wallet_address = self.mining_wallet_entry.get()
-#                result = send_transaction(transaction, wallet_address)
-#                messagebox.showinfo("Mining Result", result)
+                print(f"Block {previous_index+1} mined at difficulty {difficulty}!\nBlock mine time: {block_time}")
             else:
                 print("Failed to add block to the blockchain.")
                 BlockchainGUI.stop_mining()
