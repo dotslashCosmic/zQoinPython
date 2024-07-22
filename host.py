@@ -71,7 +71,6 @@ class Blockchain:
     def get_difficulty_and_target(self):
         if self.chain:
             index = self.chain[-1].index
-            print("Blockchain index:", index)
         else:
             index = 0
         base = 1e8
@@ -92,6 +91,9 @@ class Blockchain:
         
     def get_latest_block(self):
         return self.chain[-1]
+
+    def get_latest_index(self):
+        return self.get_latest_block().index
 
     def proof_of_work(self, index, previous_hash, timestamp, data):
         nonce = 53100
@@ -136,7 +138,7 @@ app = Flask(__name__)
 print("Loading Blockchain...")
 blockchain = Blockchain()
 difficulty, _, _ = blockchain.get_difficulty_and_target()
-print("Blockchain initialized.\nNext block difficulty:", difficulty, "\nInitializing zQoin Node...")
+print("Blockchain initialized.\nCurrent index:", blockchain.get_latest_index(), "\nNext block difficulty:", difficulty, "\nInitializing zQoin Node...")
 
 @app.route('/difficulty', methods=['GET'])
 def get_difficulty():
@@ -185,9 +187,12 @@ def get_transactions():
 @app.route('/add_block', methods=['POST'])
 def add_block():
     block_data = request.json
-    print("Received block data:", block_data)
     data = block_data['data']
     hash = block_data['hash']
+    first_hash = data.split('[')[0]
+    old_hash = blockchain.get_latest_block().hash
+    if not first_hash == old_hash:
+        return jsonify({"message": "Block declined"}), 400
     hash_rate = block_data['hash_rate']
     previous_block = blockchain.get_latest_block()
     index = previous_block.index + 1
@@ -197,7 +202,8 @@ def add_block():
     new_block = Block(index, previous_hash, timestamp, hashlib.sha3_512(data.encode('utf-8')).hexdigest(), hash, nonce)
     blockchain.chain.append(new_block)
     blockchain.save_chain()
-    return jsonify({"message": "Block added successfully!"})
+    difficulty, _, _ = blockchain.get_difficulty_and_target()
+    return jsonify({"message": "Block added successfully!"}), print(f"Block {index} mined at difficulty {difficulty}!")
 
 if __name__ == '__main__':
     print("zQoin Node Initialized.")
