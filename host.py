@@ -29,7 +29,7 @@ class Blockchain:
     def __init__(self):
         self.chain = []
         self.balances = {}
-        self.difficulty, self.target = self.get_difficulty_and_target()
+        self.difficulty, self.target, self.max_base = self.get_difficulty_and_target()
         self.load_chain()
         self.transaction_pool = []
 
@@ -42,7 +42,10 @@ class Blockchain:
                     block_data = {
                         "index": block.index,
                         "timestamp": block.timestamp,
+                        "previous_hash": block.previous_hash,
                         "data": block.data,
+                        "hash": block.hash,
+                        "nonce": block.nonce,
                     }
                     chain_data.append(block_data)
                     seen_indexes.add(block.index)
@@ -55,7 +58,10 @@ class Blockchain:
                 self.chain = [Block(
                     block['index'],
                     block['timestamp'],
+                    block['previous_hash'],
                     block.get('data', 'GENESISzQoinGENESIS'),
+                    block['hash'],
+                    block['nonce'],
                 ) for block in data['chain']]
                 self.balances = data['balances']
         except FileNotFoundError:
@@ -68,18 +74,21 @@ class Blockchain:
             print("Blockchain index:", index)
         else:
             index = 0
-        base = 1000000000
-        a = 100
-        b = 23
-        c = 7
-        d = 4
-        base_difficulty = base + (index * a)
-        additional_difficulty = ((index // b) + 10) * 1000
+        base = 1e8
+        max_base = 1e12
+        a = 9999
+        b = 999
+        c = 99
+        d = 1.999
+        e = 99999
+        base_difficulty = base + (index * a) 
+        additional_difficulty = (index // b) * e
         exponential_difficulty = int((index // c) ** d)
         difficulty = base_difficulty + additional_difficulty + exponential_difficulty
-        print("Next block difficulty:", difficulty)
-        target = '0' * difficulty
-        return difficulty, target
+        target = '0' * int(difficulty)
+        if difficulty >= max_base:
+            print(f"Reached the maximum limit of {index} zQoin in circulation.")
+        return difficulty, target, max_base
         
     def get_latest_block(self):
         return self.chain[-1]
@@ -126,12 +135,17 @@ app = Flask(__name__)
 
 print("Loading Blockchain...")
 blockchain = Blockchain()
-print("Blockchain initialized.\nInitializing zQoin Node...")
+difficulty, _, _ = blockchain.get_difficulty_and_target()
+print("Blockchain initialized.\nNext block difficulty:", difficulty, "\nInitializing zQoin Node...")
 
 @app.route('/difficulty', methods=['GET'])
 def get_difficulty():
-    difficulty, target = blockchain.get_difficulty_and_target()
-    return jsonify({'difficulty': difficulty, 'target': target})
+    difficulty, target, max_base = blockchain.get_difficulty_and_target()
+    if difficulty >= max_base:
+        print(f"Reached the maximum limit of {index} zQoin in circulation.")
+        return jsonify({'difficulty': None, 'target': None})
+    else:
+        return jsonify({'difficulty': difficulty, 'target': target, 'max_base': max_base})
 
 @app.route('/transactions', methods=['POST'])
 def add_transaction():
@@ -150,7 +164,8 @@ blockchain = Blockchain()
 def get_blocks():
     chain_data = []
     seen_hashes = set()
-    for block in blockchain.chain:
+    last_blocks = blockchain.chain[-10:]
+    for block in last_blocks:
         if block.hash not in seen_hashes:
             chain_data.append({
                 "index": block.index,
