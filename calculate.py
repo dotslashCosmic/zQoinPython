@@ -1,25 +1,28 @@
+a = 9999 # (lower is more coins, int 1-10000) Additive, base additive per block
+b = 999 # (higher is more coins, int 1-100) Additive, Every b blocks, add e
+c = 99 # (higher is more coins, int 1-100) Additive, Every c blocks, * d
+d = 1.999 # (lower is more coins, float 1.0-10.0) Exponential multiplier
+e = 99999 # (lower is more coins, int 1-1000000) How much to add every b blocks
+base = 1e8 # Base difficulty
+target = 1e12 # Maximum difficulty
+# 1e8 = easy, 1e11 = medium, 1e14 = hard
+
 def calculate_difficulty(index):
-    a = 100 # (lower is more, int 1-1000) Additive
-    b = 23 # (higher is more, int 1-10000) Additive
-    c = 7 # (higher is more, int 1-10000) Additive
-    d = 4 # (lower is more, float 1.0-10.0) Exponential-speed multiplier
     base_difficulty = base + (index * a) 
-    additional_difficulty = 1 + ((index // b) + 10) * 1000
-    exponential_difficulty = 1 + int((index // c) ** d)
+    additional_difficulty = (index // b) * e
+    exponential_difficulty = (index // c) ** d
     difficulty = base_difficulty + additional_difficulty + exponential_difficulty
     return difficulty
 
-print("Calculating number of zQoins based on difficulty...\nThis may take a while...")
-base = 1000000000 # Base difficulty
-target_difficulty = 10000000000 # Maximum difficulty
-index = 0 # Number of blocks on the blockchain
-iterations = 0
+print("Calculating number of zQoins...\nThis may take a while...")
+coins, index = 0, 0
+base_p, target_p = int(base/1e8), int(target/1e8)
 while True:
-    if index % 1000000 == 0:
-        print(f"{(index // 1000000) * 1} million zQoins", end='\r')
+    if index % 1e6 == 0:
+        print(f"{(index // 1e6) * 1} million zQoins", end='\r')
     difficulty = calculate_difficulty(index)
-    if difficulty >= target_difficulty:
+    if difficulty >= target:
         break
     index += 1
-    iterations += 1
-print(f"\nMax zQoins:", iterations, "\nMinimum blockchain size:", int((282 + ((iterations - 1)*179))/1024/1024), "mb", "\nApproximate days to mine @500H/s:", int(iterations*2/60/60/24), "\nBase difficulty:", base/100000000, "\nMax difficulty:", target_difficulty/100000000)
+    coins += 1
+print(f"\nMax zQoins:", coins, "\nMinimum blockchain size:", int((280 + ((coins - 1)*484))/1048576), "mb", "\nApproximate days to mine @500H/s:", int(coins/43200), "\na:\t", a, "\nb:\t", b, "\nc:\t", c, "\nd:\t", d, "\ne:\t", e, "\nbase:\t", base, "\ntarget:\t", target, "\nDifficulty start:", base_p, "\nDifficulty end:  ", target_p)
