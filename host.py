@@ -186,6 +186,7 @@ def get_transactions():
 
 @app.route('/add_block', methods=['POST'])
 def add_block():
+    difficulty, _, _ = blockchain.get_difficulty_and_target()
     block_data = request.json
     data = block_data['data']
     hash = block_data['hash']
@@ -202,7 +203,6 @@ def add_block():
     new_block = Block(index, previous_hash, timestamp, hashlib.sha3_512(data.encode('utf-8')).hexdigest(), hash, nonce)
     blockchain.chain.append(new_block)
     blockchain.save_chain()
-    difficulty, _, _ = blockchain.get_difficulty_and_target()
     return jsonify({"message": "Block added successfully!"}), print(f"Block {index} mined at difficulty {difficulty}!")
 
 if __name__ == '__main__':
