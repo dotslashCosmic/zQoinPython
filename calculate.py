@@ -8,21 +8,20 @@ target = 1e12 # Maximum difficulty
 # 1e8 = easy, 1e11 = medium, 1e14 = hard
 
 def calculate_difficulty(index):
-    base_difficulty = base + (index * a) 
-    additional_difficulty = (index // b) * e
-    exponential_difficulty = (index // c) ** d
+    base_difficulty = base + (coins * a) 
+    additional_difficulty = (coins // b) * e
+    exponential_difficulty = (coins // c) ** d
     difficulty = base_difficulty + additional_difficulty + exponential_difficulty
     return difficulty
 
 print("Calculating number of zQoins...\nThis may take a while...")
-coins, index = 0, 0
+coins = 0
 base_p, target_p = int(base/1e8), int(target/1e8)
 while True:
-    if index % 1e6 == 0:
-        print(f"{(index // 1e6) * 1} million zQoins", end='\r')
-    difficulty = calculate_difficulty(index)
+    if coins % 1e6 == 0:
+        print(f"{(coins // 1e6) * 1} million zQoins", end='\r')
+    difficulty = calculate_difficulty(coins)
     if difficulty >= target:
         break
-    index += 1
     coins += 1
 print(f"\nMax zQoins:", coins, "\nMinimum blockchain size:", int((280 + ((coins - 1)*484))/1048576), "mb", "\nApproximate days to mine @500H/s:", int(coins/43200), "\na:\t", a, "\nb:\t", b, "\nc:\t", c, "\nd:\t", d, "\ne:\t", e, "\nbase:\t", base, "\ntarget:\t", target, "\nDifficulty start:", base_p, "\nDifficulty end:  ", target_p)
