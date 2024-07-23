@@ -1,4 +1,6 @@
+#Author: dotslashCosmic
 import tkinter as tk
+from flask import Flask, request, jsonify
 from tkinter import simpledialog
 from tkinter import messagebox
 from datetime import datetime
@@ -75,7 +77,6 @@ def send_transaction(transaction, wallet_address):
         'wallet': wallet_address
     }
     response = requests.post(url, json=payload)
-    return response.json()
 
 def get_index():
     response = requests.get(localip + '/index')
@@ -91,7 +92,6 @@ class BlockchainGUI:
         self.root.title("zQoin GUI")
         self.mining = False
         self.hash_rate = 0
-        self.difficulty2 = 1
         if os.path.exists('wallet.json'):
             with open('wallet.json', 'r') as f:
                 keys = json.load(f)[0]
@@ -105,7 +105,8 @@ class BlockchainGUI:
                 return
             self.wallet = Wallet(nickname)
             self.wallet.save_keys()
-        self.sender_wallet_label = tk.Label(root, text=f"Welcome to zQoin Client\nCurrent Wallet: {self.wallet.nickname}\nAmount: {self.wallet.amount} zQoin\n\t\t\t\t\t\t")
+        self.miner_address = self.wallet.public_key
+        self.sender_wallet_label = tk.Label(root, text=f"Welcome to zQoin Client\nCurrent Wallet: {self.wallet.nickname}\nAmount: {self.wallet.amount:.8f} zQoin\n\t\t\t\t\t\t")
         self.sender_wallet_label.pack(pady=10)
         self.sender_wallet_entry = tk.Entry(root)
         self.sender_wallet_entry.pack(pady=10)
@@ -192,7 +193,7 @@ class BlockchainGUI:
         transaction = create_transaction(self.wallet.public_key, receiver, str(amount))
         result = send_transaction(transaction, self.wallet.public_key)
         messagebox.showinfo("Mining Result", result)
-
+        
     def mine(self):
         index = 0
         while self.mining:
@@ -234,8 +235,6 @@ class BlockchainGUI:
                 self.hash_rate = float('inf')
             else:
                 self.hash_rate = 1 / time_diff
-            if self.hash_rate == float('inf'):
-                self.hash_rate = 1 / time_diff
             block_data = {
                 'data': data,
             }
@@ -246,27 +245,17 @@ class BlockchainGUI:
             block_data = {
                 'data': last_10_hashes,
                 'hash': result,
-                'hash_rate': self.hash_rate
+                'hash_rate': self.hash_rate,
+                'miner': self.wallet.public_key
             }
             response = requests.post(localip + '/add_block', json=block_data)
             if response.status_code == 200:
-#TODO Add mining pool server side, for now adding 1 directly to wallet.json
-                with open('wallet.json', 'r') as file:
-                    data = json.load(file)
-                public_key = self.wallet.public_key
-                for entry in data:
-                    if entry['public_key'] == public_key:
-                        entry['amount'] += 1
-                        break
-                with open('wallet.json', 'w') as file:
-                    json.dump(data, file, indent=4)
                 block_time = datetime.fromtimestamp(int(end_time)).strftime('%m/%d/%Y %H:%M:%S')
-                print(f"Block {previous_index+1} mined at difficulty {difficulty}!\nBlock mine time: {block_time}")
+                print(f"Block {previous_index+1} mined at difficulty {difficulty}!\nBlock mine time: {block_time}\nMined data: {result}")
+                index += 1
             else:
                 print("Failed to add block to the blockchain.")
-                BlockchainGUI.stop_mining()
-            print(f"Mined data: {result}")
-            index += 1
+                self.stop_mining()
 
         def mine():
             start_time = time.time()
@@ -286,7 +275,36 @@ class BlockchainGUI:
         self.hash_rate_label.config(text=f"Hash Rate: {self.hash_rate} H/s")
         self.root.after(1000, self.update_hash_rate)
 
+app = Flask(__name__)
+
+@app.route('/update_wallet', methods=['POST'])
+def update_wallet():
+    data = request.get_json()
+    message = data.get('message')
+    address = data.get('address')
+    print(message, address)
+    if message == 'approved':
+        with open('wallet.json', 'r') as file:
+            data = json.load(file)
+        for entry in data:
+            if entry['public_key'] == address:
+                entry['amount'] += float(1)
+                new_amount = entry['amount']
+                break
+        with open('wallet.json', 'w') as file:
+            json.dump(data, file, indent=4)
+        gui.sender_wallet_label.config(text=f"Welcome to zQoin Client\nCurrent Wallet: {gui.wallet.nickname}\nAmount: {new_amount:.8f} zQoin\n\t\t\t\t\t\t")
+        return jsonify({"message": f"Mining pool rewarded {address}!"}), 200
+    else:
+        print("Wallet update failed.")
+
+def run_flask_app():
+    app.run(port=5311)
+
 if __name__ == '__main__':
+    flask_thread = threading.Thread(target=run_flask_app)
+    flask_thread.daemon = True
+    flask_thread.start()
     root = tk.Tk()
     gui = BlockchainGUI(root)
     root.mainloop()
