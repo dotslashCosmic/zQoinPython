@@ -1,26 +1,59 @@
 #Author: dotslashCosmic
+import sys
 import tkinter as tk
 from flask import Flask, request, jsonify
 from tkinter import simpledialog
 from tkinter import messagebox
 from datetime import datetime
-import threading, time, requests, json, hashlib, os
+import threading, time, requests, json, hashlib, os, binascii, secrets
 
-localip = 'http://127.0.0.1:5310'
-localhost = 'http://localhost:5310'
+client_port = 5317
+host_port = 5318
+localip = f'http://127.0.0.1:{host_port}'
+localhost = f'http://localhost:{host_port}'
+coin_name = 'zQoin'
+short_name = 'zqn'
+if not len(short_name) == 3:
+   print("Short name must be 3 characters. Defaulting.")
+   short_name = 'zqn'
+
+def generate_entropy(bits=128):
+    return secrets.token_bytes(bits // 8)
+
+def entropy_to_mnemonic(entropy):
+    entropy_bits = bin(int.from_bytes(entropy, byteorder='big'))[2:].zfill(len(entropy) * 8)
+    checksum_length = len(entropy_bits) // 32
+    checksum = bin(int(hashlib.sha256(entropy).hexdigest(), 16))[2:].zfill(256)[:checksum_length]
+    bits = entropy_bits + checksum
+    response = requests.get('https://raw.githubusercontent.com/bitcoin/bips/master/bip-0039/english.txt')
+    if response.status_code == 200:
+        wordlist = response.text.splitlines()
+    else:
+        print("Failed to fetch wordlist.")
+        return None
+    words = [wordlist[int(bits[i:i+11], 2)] for i in range(0, len(bits), 11)]
+    return ' '.join(words)
+
+def mnemonic_to_seed(mnemonic, passphrase=''):
+    mnemonic = mnemonic.encode('utf-8')
+    salt = ('mnemonic' + passphrase).encode('utf-8')
+    return hashlib.pbkdf2_hmac('sha512', mnemonic, salt, 2048, dklen=64)
 
 class Wallet:
     def __init__(self, nickname, amount=0):
-        self.private_key = self.generate_private_key()
+        self.entropy = generate_entropy()
+        self.mnemonic = entropy_to_mnemonic(self.entropy)
+        self.seed = mnemonic_to_seed(self.mnemonic)
+        self.private_key = self.generate_private_key(self.seed)
         self.public_key = self.generate_public_key(self.private_key)
         self.nickname = nickname
         self.amount = amount
 
-    def generate_private_key(self):
-        return hashlib.sha3_512(os.urandom(64)).hexdigest()
+    def generate_private_key(self, seed):
+        return hashlib.sha3_512(seed).hexdigest()
         
     def generate_public_key(self, private_key):
-        return 'zqn' + hashlib.sha3_512(private_key.encode('utf-8')).hexdigest()[-61:]
+        return short_name + hashlib.sha3_512(private_key.encode('utf-8')).hexdigest()[-61:]
 
     def save_keys(self):
         if os.path.exists('wallet.json'):
@@ -28,7 +61,10 @@ class Wallet:
                 wallets = json.load(f)
         else:
             wallets = []
-        wallets.append({
+        wallets.append(
+        {
+            'mnemonic': self.mnemonic,
+            'seed': binascii.hexlify(self.seed).decode(),
             'private_key': self.private_key,
             'public_key': self.public_key,
             'nickname': self.nickname,
@@ -36,6 +72,10 @@ class Wallet:
         })
         with open('wallet.json', 'w') as f:
             json.dump(wallets, f, indent=4)
+        recovery = f"Wallet nickname: {self.nickname}\nWallet address: {self.public_key}\nRecovery key: {self.mnemonic}"
+        public_short = self.public_key[:-51]
+        with open(f'{public_short}_recovery.txt', 'w') as file:
+            file.write(recovery)
 
     def load_keys(self):
         with open('wallet.json', 'r') as f:
@@ -84,12 +124,12 @@ def get_index():
         data = response.json()
         index = data['index']
     else:
-        print("zQoin Node offline.")
+        print(f"{coin_name} Node offline.")
 
 class BlockchainGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("zQoin GUI")
+        self.root.title(f"{coin_name} GUI")
         self.mining = False
         self.hash_rate = 0
         if os.path.exists('wallet.json'):
@@ -106,7 +146,7 @@ class BlockchainGUI:
             self.wallet = Wallet(nickname)
             self.wallet.save_keys()
         self.miner_address = self.wallet.public_key
-        self.sender_wallet_label = tk.Label(root, text=f"Welcome to zQoin Client\nCurrent Wallet: {self.wallet.nickname}\nAmount: {self.wallet.amount:.8f} zQoin\n\t\t\t\t\t\t")
+        self.sender_wallet_label = tk.Label(root, text=f"Welcome to {coin_name} Client\nCurrent Wallet: {self.wallet.nickname}\nAmount: {self.wallet.amount:.8f} {coin_name}\n\t\t\t\t\t\t")
         self.sender_wallet_label.pack(pady=10)
         self.sender_wallet_entry = tk.Entry(root)
         self.sender_wallet_entry.pack(pady=10)
@@ -123,7 +163,25 @@ class BlockchainGUI:
         self.hash_rate_label = tk.Label(root, text="Hash Rate: 0 H/s")
         self.hash_rate_label.pack(pady=10)
         self.update_hash_rate()
-
+        with open(__file__, 'rb') as file:
+            client = file.read()
+        self.client_hash = hashlib.sha3_512(client).hexdigest()
+        self.check_hash_with_server()
+        
+    def check_hash_with_server(self):
+        url = localip+'/check_client'
+        data = {
+            'client_hash': self.client_hash,
+            'coin_name': coin_name,
+            'client_wallet': self.miner_address
+        }
+        response = requests.post(url, json=data)
+        if response.status_code == 200 and response.json().get('status') == 'success':
+            return
+        else:
+            print("Failure to verify client.")
+            sys.exit(1)
+            
     def create_transaction(self):
         receiver = self.receiver_wallet_entry.get()
         amount = self.amount_entry.get()
@@ -172,8 +230,9 @@ class BlockchainGUI:
         self.mining = True
         self.mine_button.config(text="---Stop Mining---", command=self.stop_mining)
         print("Mining starting...")
+        #more power to the thread for more speed?
         threading.Thread(target=self.mine).start()
-
+        
     def stop_mining(self):
         self.mining = False
         print("Mining stopped.")
@@ -207,7 +266,7 @@ class BlockchainGUI:
                 print("Failed to fetch difficulty.")
                 return
             if index >= max_base:
-                print("Reached the maximum limit of zQoin in circulation. Stopping mining.")
+                print(f"Reached the maximum limit of {coin_name} in circulation. Stopping mining.")
                 break
             response = requests.get(f"{localip}/blocks")
             if response.status_code == 200:
@@ -251,7 +310,7 @@ class BlockchainGUI:
             response = requests.post(localip + '/add_block', json=block_data)
             if response.status_code == 200:
                 block_time = datetime.fromtimestamp(int(end_time)).strftime('%m/%d/%Y %H:%M:%S')
-                print(f"Block {previous_index+1} mined at difficulty {difficulty}!\nBlock mine time: {block_time}\nMined data: {result}")
+                print(f"Block {previous_index+1} mined at difficulty {difficulty}!\nMined data: {result}")
                 index += 1
             else:
                 print("Failed to add block to the blockchain.")
@@ -260,7 +319,7 @@ class BlockchainGUI:
         def mine():
             start_time = time.time()
             while self.mining:
-                data = "GENESISzQoinGENESIS"
+                data = f"GENESIS{coin_name}GENESIS"
                 result = send_transaction(data, self.wallet.public_key)
                 end_time = time.time()
                 time_diff = end_time - start_time
@@ -276,30 +335,30 @@ class BlockchainGUI:
         self.root.after(1000, self.update_hash_rate)
 
 app = Flask(__name__)
-
+    
 @app.route('/update_wallet', methods=['POST'])
 def update_wallet():
     data = request.get_json()
     message = data.get('message')
     address = data.get('address')
-    print(message, address)
+    reward = data.get('amount')
     if message == 'approved':
         with open('wallet.json', 'r') as file:
             data = json.load(file)
         for entry in data:
             if entry['public_key'] == address:
-                entry['amount'] += float(1)
+                entry['amount'] += reward
                 new_amount = entry['amount']
                 break
         with open('wallet.json', 'w') as file:
             json.dump(data, file, indent=4)
-        gui.sender_wallet_label.config(text=f"Welcome to zQoin Client\nCurrent Wallet: {gui.wallet.nickname}\nAmount: {new_amount:.8f} zQoin\n\t\t\t\t\t\t")
+        gui.sender_wallet_label.config(text=f"Welcome to {coin_name} Client\nCurrent Wallet: {gui.wallet.nickname}\nAmount: {new_amount:.8f} {coin_name}\n\t\t\t\t\t\t")
         return jsonify({"message": f"Mining pool rewarded {address}!"}), 200
     else:
         print("Wallet update failed.")
 
 def run_flask_app():
-    app.run(port=5311)
+    app.run(port=client_port)
 
 if __name__ == '__main__':
     flask_thread = threading.Thread(target=run_flask_app)
