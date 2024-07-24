@@ -7,7 +7,7 @@ from client import BlockchainGUI
 client_port = 5317
 host_port = 5318
 full_name = "zQoin"
-client_version = "a1d3a1eeca03287d0f1011c0ee2cd42755058ba4193cdd94968a310ba766931a8123743e3f5389b1c72ced883ea47108c80d7b8a5be5e9cd8adbee1b93710490"
+client_version = "2e6ab0376ea2feae2bdc0734cf03304f3cc9623f9d74ab1363633f4ba493fa71d248e53819d1dffe120d75370e1fd1edd5da9da7f5a245df66c36ee320d618fe"
 
 class Block:
     def __init__(self, index, previous_hash, timestamp, data, hash, nonce):
@@ -40,7 +40,6 @@ class Blockchain:
         self.transaction_pool = []
         self.nonce = self.nonce_chain()
 
-    #encrypt save and load files, with persistance between script restarts
     def save_chain(self):
         with open('blockchain.json', 'w') as f:
             chain_data = []
@@ -230,9 +229,19 @@ def add_block():
     #TODO Update to grab the miners IP address instead of localhost
     response = requests.post(f'http://localhost:{client_port}/update_wallet', json=data)
     if response.status_code == 200:
-        return jsonify({"message": "Block added successfully!"}), 200
+        with open('hostwallet.json', 'r') as f:
+            host_wallets = json.load(f)
+        for wallet in host_wallets:
+            if wallet['public_key'] == miner:
+                wallet['amount'] = int(wallet['amount'])
+                wallet['amount'] += 1
+                break
+        with open('hostwallet.json', 'w') as f:
+            json.dump(host_wallets, f, indent=4)
+        return jsonify({"message": f"Block {index} mined successfully!"}), 200
     else:
         print("Failed to send mining pool rewards.")
+        return jsonify({"message": "Failed to send mining pool rewards."}), 500
         #TODO Retroactively queue bad rewards for future attempts
 
 @app.route('/latest_block', methods=['GET'])
@@ -257,8 +266,83 @@ def check_client():
     if client_hash == client_version and coin_name == full_name:
         return jsonify({"status": "success"}), print(f"{client_wallet} is verified.")
     else:
+        #On failure, remove the wallet that was just created, if there was a creation that just happened with that wallet address
         return jsonify({"status": "failure"}), print(f"{client_wallet} failure to verify: {client_hash}")
+        
+@app.route('/wallet_exists', methods=['POST'])
+def wallet_exists():
+    data = request.get_json()
+    public_key = data.get('public_key')
+    try:
+        with open('hostwallet.json', 'r') as f:
+            wallets = json.load(f)
+        for wallet in wallets:
+            if wallet['public_key'] == public_key:
+                return jsonify({'exists': True})
+    except FileNotFoundError:
+        with open('hostwallet.json', 'w') as f:
+            json.dump([], f)
+        return jsonify({'exists': False})
 
+@app.route('/get_wallet', methods=['POST'])
+def get_wallet():
+    data = request.get_json()
+    public_key = data.get('public_key')
+    with open('hostwallet.json', 'r') as f:
+        wallets = json.load(f)
+    for wallet in wallets:
+        if wallet['public_key'] == public_key:
+            return jsonify({
+                'private_key': wallet['private_key'],
+                'public_key': wallet['public_key'],
+                'amount': wallet['amount']
+            })
+    return jsonify({'error': 'Wallet not found.'}), 404
+    
+@app.route('/create_wallet', methods=['POST'])
+def create_wallet():
+    data = request.get_json()
+    if isinstance(data, list):
+        for wallet_data in data:
+            mnemonic = wallet_data.get('mnemonic')
+            seed = wallet_data.get('seed')
+            private_key = wallet_data.get('private_key')
+            public_key = wallet_data.get('public_key')
+            nickname = wallet_data.get('nickname')
+            try:
+                with open('hostwallet.json', 'r') as f:
+                    wallets = json.load(f)
+            except FileNotFoundError:
+                wallets = []
+            wallets.append({
+                'mnemonic': mnemonic,
+                'seed': seed,
+                'private_key': private_key,
+                'public_key': public_key,
+                'nickname': nickname,
+                'amount': '0'
+            })
+            with open('hostwallet.json', 'w') as f:
+                json.dump(wallets, f, indent=4)
+        return jsonify({'message': f'Wallet {public_key} created.'})
+    else:
+        return jsonify({'error': 'Invalid data format.'}), 400
+
+@app.route('/add_amount', methods=['POST'])
+def add_amount():
+    data = request.get_json()
+    public_key = data.get('public_key')
+    amount = data.get('amount')
+    with open('hostwallet.json', 'r') as f:
+        wallets = json.load(f)
+    for wallet in wallets:
+        if wallet['public_key'] == public_key:
+            wallet['amount'] += amount
+            break
+    with open('hostwallet.json', 'w') as f:
+        json.dump(wallets, f, indent=4)
+    return jsonify({'message': 'Amount added successfully'})
+    
 if __name__ == '__main__':
     print("zQoin Node Initialized.")
     app.run(port=host_port)
