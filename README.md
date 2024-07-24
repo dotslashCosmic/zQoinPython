@@ -10,3 +10,8 @@ Stupid little project I felt like making today, might make something out of it
 - I'm going to try to make an actual cryptocurrency, gl me
 
 Requires $ pip install flask & tkinter
+
+To customize:
+- in client.py, change: coin_name, short_name, client_port, host_port
+- sha3-512 client.py
+- in host.py, change: client_port, host_port, full_name(coin_name), and client_version with the client.py sha3-512 hash
