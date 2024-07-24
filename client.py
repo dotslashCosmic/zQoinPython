@@ -51,37 +51,52 @@ class Wallet:
 
     def generate_private_key(self, seed):
         return hashlib.sha3_512(seed).hexdigest()
-        
+
     def generate_public_key(self, private_key):
         return short_name + hashlib.sha3_512(private_key.encode('utf-8')).hexdigest()[-61:]
 
     def save_keys(self):
-        if os.path.exists('wallet.json'):
-            with open('wallet.json', 'r') as f:
-                wallets = json.load(f)
-        else:
-            wallets = []
-        wallets.append(
-        {
-            'mnemonic': self.mnemonic,
-            'seed': binascii.hexlify(self.seed).decode(),
-            'private_key': self.private_key,
-            'public_key': self.public_key,
-            'nickname': self.nickname,
-            'amount': self.amount
-        })
-        with open('wallet.json', 'w') as f:
-            json.dump(wallets, f, indent=4)
-        recovery = f"Wallet nickname: {self.nickname}\nWallet address: {self.public_key}\nRecovery key: {self.mnemonic}"
-        public_short = self.public_key[:-51]
-        with open(f'{public_short}_recovery.txt', 'w') as file:
-            file.write(recovery)
+        url = localhost+'/wallet_exists'
+        response = requests.post(url, json={'public_key': self.public_key})
+        if not response.json().get('exists'):
+            wallet_data = {
+                'mnemonic': self.mnemonic,
+                'seed': binascii.hexlify(self.seed).decode(),
+                'private_key': self.private_key,
+                'public_key': self.public_key,
+                'nickname': self.nickname,
+                'amount': '0',
+            }
+            url = localhost+'/create_wallet'
+            response = requests.post(url, json=[wallet_data])
+            if response.status_code == 200:
+                with open('wallet.json', 'w') as f:
+                    json.dump([wallet_data], f, indent=4)
+            else:
+                print("Wallet creation failed.")
+                return
 
     def load_keys(self):
-        with open('wallet.json', 'r') as f:
-            keys = json.load(f)
+        url = localhost+'/get_wallet'
+        response = requests.post(url, json={'public_key': self.public_key})
+        if response.status_code == 200:
+            keys = response.json()
             self.private_key = keys['private_key']
             self.public_key = keys['public_key']
+            self.amount = keys['amount']
+            if os.path.exists('wallet.json'):
+                with open('wallet.json', 'r') as f:
+                    local_keys = json.load(f)[0]
+                if (self.private_key == local_keys['private_key'] and
+                    self.public_key == local_keys['public_key'] and
+                    self.amount == local_keys['amount']):
+                    print("Wallets verified.")
+                else:
+                    print("Wallets verification FAILED.")
+            else:
+                print("wallet.json does not exist.")
+        else:
+            print("Failed to load keys from the server.")
 
 def create_transaction(sender, receiver, amount, private_key):
     transaction = {
@@ -128,16 +143,26 @@ def get_index():
 
 class BlockchainGUI:
     def __init__(self, root):
+        with open(__file__, 'rb') as file:
+            client = file.read()
+        self.client_hash = hashlib.sha3_512(client).hexdigest()
         self.root = root
         self.root.title(f"{coin_name} GUI")
         self.mining = False
         self.hash_rate = 0
+        self.wallet = None
         if os.path.exists('wallet.json'):
             with open('wallet.json', 'r') as f:
                 keys = json.load(f)[0]
             self.wallet = Wallet(keys['nickname'], keys['amount'])
             self.wallet.private_key = keys['private_key']
             self.wallet.public_key = keys['public_key']
+            response = requests.post(localip+'/get_wallet', json={'public_key': self.wallet.public_key})
+            response_keys = response.json()
+            if not (self.wallet.private_key == response_keys['private_key'] and 
+                    self.wallet.public_key == response_keys['public_key'] and 
+                    self.wallet.amount == response_keys['amount']):
+                return print("Fake wallet.")
         else:
             nickname = tk.simpledialog.askstring("Input", "Enter a nickname for the wallet:")
             if not nickname:
@@ -145,8 +170,8 @@ class BlockchainGUI:
                 return
             self.wallet = Wallet(nickname)
             self.wallet.save_keys()
-        self.miner_address = self.wallet.public_key
-        self.sender_wallet_label = tk.Label(root, text=f"Welcome to {coin_name} Client\nCurrent Wallet: {self.wallet.nickname}\nAmount: {self.wallet.amount:.8f} {coin_name}\n\t\t\t\t\t\t")
+        self.check_hash_with_server()
+        self.sender_wallet_label = tk.Label(root, text=f"Welcome to {coin_name} Client\nCurrent Wallet: {self.wallet.nickname}\nAmount: {self.wallet.amount} {coin_name}\n\t\t\t\t\t\t")
         self.sender_wallet_label.pack(pady=10)
         self.sender_wallet_entry = tk.Entry(root)
         self.sender_wallet_entry.pack(pady=10)
@@ -163,17 +188,13 @@ class BlockchainGUI:
         self.hash_rate_label = tk.Label(root, text="Hash Rate: 0 H/s")
         self.hash_rate_label.pack(pady=10)
         self.update_hash_rate()
-        with open(__file__, 'rb') as file:
-            client = file.read()
-        self.client_hash = hashlib.sha3_512(client).hexdigest()
-        self.check_hash_with_server()
-        
+
     def check_hash_with_server(self):
         url = localip+'/check_client'
         data = {
             'client_hash': self.client_hash,
             'coin_name': coin_name,
-            'client_wallet': self.miner_address
+            'client_wallet': self.wallet.public_key
         }
         response = requests.post(url, json=data)
         if response.status_code == 200 and response.json().get('status') == 'success':
@@ -181,7 +202,7 @@ class BlockchainGUI:
         else:
             print("Failure to verify client.")
             sys.exit(1)
-            
+
     def create_transaction(self):
         receiver = self.receiver_wallet_entry.get()
         amount = self.amount_entry.get()
@@ -268,7 +289,7 @@ class BlockchainGUI:
             if index >= max_base:
                 print(f"Reached the maximum limit of {coin_name} in circulation. Stopping mining.")
                 break
-            response = requests.get(f"{localip}/blocks")
+            response = requests.get(localip+"/blocks")
             if response.status_code == 200:
                 blocks = response.json()
                 previous_block = blocks[-1]
@@ -277,7 +298,7 @@ class BlockchainGUI:
             else:
                 print("Failed to fetch the latest block.")
                 return
-            response = requests.get(localip + '/transactions')
+            response = requests.get(localip+'/transactions')
             if response.status_code == 200:
                 transactions = response.json()
                 transactions_data = json.dumps(transactions)
@@ -307,7 +328,7 @@ class BlockchainGUI:
                 'hash_rate': self.hash_rate,
                 'miner': self.wallet.public_key
             }
-            response = requests.post(localip + '/add_block', json=block_data)
+            response = requests.post(localip+'/add_block', json=block_data)
             if response.status_code == 200:
                 block_time = datetime.fromtimestamp(int(end_time)).strftime('%m/%d/%Y %H:%M:%S')
                 print(f"Block {previous_index+1} mined at difficulty {difficulty}!\nMined data: {result}")
@@ -341,18 +362,19 @@ def update_wallet():
     data = request.get_json()
     message = data.get('message')
     address = data.get('address')
-    reward = data.get('amount')
+    reward = int(data.get('amount'))
     if message == 'approved':
         with open('wallet.json', 'r') as file:
             data = json.load(file)
         for entry in data:
             if entry['public_key'] == address:
+                entry['amount'] = int(entry['amount'])
                 entry['amount'] += reward
                 new_amount = entry['amount']
                 break
         with open('wallet.json', 'w') as file:
             json.dump(data, file, indent=4)
-        gui.sender_wallet_label.config(text=f"Welcome to {coin_name} Client\nCurrent Wallet: {gui.wallet.nickname}\nAmount: {new_amount:.8f} {coin_name}\n\t\t\t\t\t\t")
+        gui.sender_wallet_label.config(text=f"Welcome to {coin_name} Client\nCurrent Wallet: {gui.wallet.nickname}\nAmount: {new_amount} {coin_name}\n\t\t\t\t\t\t")
         return jsonify({"message": f"Mining pool rewarded {address}!"}), 200
     else:
         print("Wallet update failed.")
