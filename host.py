@@ -1,7 +1,13 @@
 #Author: dotslashCosmic
-import hashlib, time, json, requests
+import hashlib, time, json, requests, os
 from flask import Flask, jsonify, request
+from decimal import Decimal
 from client import BlockchainGUI
+
+client_port = 5317
+host_port = 5318
+full_name = "zQoin"
+client_version = "a1d3a1eeca03287d0f1011c0ee2cd42755058ba4193cdd94968a310ba766931a8123743e3f5389b1c72ced883ea47108c80d7b8a5be5e9cd8adbee1b93710490"
 
 class Block:
     def __init__(self, index, previous_hash, timestamp, data, hash, nonce):
@@ -18,13 +24,12 @@ def calculate_hash(index, previous_hash, timestamp, data, nonce):
     return hashlib.sha3_512(value.encode('utf-8')).hexdigest()
 
 def create_genesis_block():
-    index = 0
-    previous_hash = "0"
+    index, previous_hash = 0, 0
     timestamp = int(time.time())
-    data = "GENESISzQoinGENESIS"
-    nonce = 53100
-    hash = calculate_hash(index, previous_hash, timestamp, data, nonce)
-    return Block(index, previous_hash, timestamp, data, hash, nonce)
+    nonce = int.from_bytes(os.urandom(8), 'big')
+    genesis = hashlib.sha3_512((str(timestamp)+full_name+str(nonce)+"GENESIS").encode()).hexdigest()
+    hash = calculate_hash(index, previous_hash, timestamp, genesis, nonce)
+    return Block(index, previous_hash, timestamp, genesis, hash, nonce)
 
 class Blockchain:
     def __init__(self):
@@ -33,7 +38,9 @@ class Blockchain:
         self.difficulty, self.target, self.max_base = self.get_difficulty_and_target()
         self.load_chain()
         self.transaction_pool = []
+        self.nonce = self.nonce_chain()
 
+    #encrypt save and load files, with persistance between script restarts
     def save_chain(self):
         with open('blockchain.json', 'w') as f:
             chain_data = []
@@ -95,13 +102,21 @@ class Blockchain:
 
     def get_latest_index(self):
         return self.get_latest_block().index
+        
+    def nonce_chain(self):
+        try:
+            self.load_chain()
+            return self.chain[-1].nonce if self.chain else 0
+        except FileNotFoundError:
+            self.chain.append(create_genesis_block())
+            self.balances["0"] = 0
+            return self.chain[-1].nonce
 
     def proof_of_work(self, index, previous_hash, timestamp, data):
-        nonce = 53100
+        nonce = self.nonce_chain()
         difficulty, _, _ = self.get_difficulty_and_target()
         while True:
             hash = calculate_hash(index, previous_hash, timestamp, data, nonce)
-
             if hash[:int(difficulty)] == '0' * int(difficulty):
                 return nonce, hash
             nonce += 1
@@ -139,12 +154,11 @@ app = Flask(__name__)
 print("Loading Blockchain...")
 blockchain = Blockchain()
 difficulty, _, _ = blockchain.get_difficulty_and_target()
-print("Blockchain initialized.\nCurrent index:", blockchain.get_latest_index(), "\nNext block difficulty:", difficulty)
+print("Blockchain initialized.\nCurrent block:", blockchain.get_latest_index(), "\nNext block difficulty:", difficulty)
 
 @app.route('/difficulty', methods=['GET'])
 def get_difficulty():
     difficulty, target, max_base = blockchain.get_difficulty_and_target()
-
     if difficulty >= max_base:
         print(f"Reached the maximum limit of zQoin in circulation.")
         return jsonify({'difficulty': None, 'target': None})
@@ -188,6 +202,7 @@ def get_transactions():
 
 @app.route('/add_block', methods=['POST'])
 def add_block():
+    #if 500/RemoteDisconnected risen, dump packet and do not save the blockchain or send rewards
     difficulty, _, _ = blockchain.get_difficulty_and_target()
     block_data = request.json
     data = block_data['data']
@@ -197,21 +212,23 @@ def add_block():
     old_hash = blockchain.get_latest_block().hash
     if not first_hash == old_hash:
         return jsonify({"message": "Block declined"}), 400
-    hash_rate = block_data['hash_rate']
     previous_block = blockchain.get_latest_block()
     index = previous_block.index + 1
+    hash_rate = block_data['hash_rate']
     timestamp = int(time.time())
     previous_hash = previous_block.hash
-    new_block = Block(index, previous_hash, timestamp, hashlib.sha3_512(data.encode('utf-8')).hexdigest(), hash, 53100)
+    nonce = blockchain.nonce_chain()
+    new_block = Block(index, previous_hash, timestamp, hashlib.sha3_512(data.encode('utf-8')).hexdigest(), hash, nonce)
     blockchain.chain.append(new_block)
     blockchain.save_chain()
-    print(f"Block {index} mined at difficulty {difficulty}!")
+    print(f"Block {index} at difficulty {difficulty} ready to mine.")
     data = {
         'message': "approved",
-        'address': miner
+        'address': miner,
+        'amount': 1
     }
     #TODO Update to grab the miners IP address instead of localhost
-    response = requests.post('http://localhost:5311/update_wallet', json=data)
+    response = requests.post(f'http://localhost:{client_port}/update_wallet', json=data)
     if response.status_code == 200:
         return jsonify({"message": "Block added successfully!"}), 200
     else:
@@ -231,6 +248,17 @@ def latest_block():
     }
     return jsonify(block_data), 200
     
+@app.route('/check_client', methods=['POST'])
+def check_client():
+    data = request.get_json()
+    client_hash = data.get('client_hash')
+    coin_name = data.get('coin_name')
+    client_wallet = data.get('client_wallet')
+    if client_hash == client_version and coin_name == full_name:
+        return jsonify({"status": "success"}), print(f"{client_wallet} is verified.")
+    else:
+        return jsonify({"status": "failure"}), print(f"{client_wallet} failure to verify: {client_hash}")
+
 if __name__ == '__main__':
     print("zQoin Node Initialized.")
-    app.run(port=5310)
+    app.run(port=host_port)
