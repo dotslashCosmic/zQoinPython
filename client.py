@@ -94,7 +94,7 @@ class Wallet:
                 else:
                     print("Wallets verification FAILED.")
             else:
-                print("wallet.json does not exist.")
+                print("Your wallet does not exist!\nTry to recover your wallet.")
         else:
             print("Failed to load keys from the server.")
 
@@ -146,6 +146,7 @@ class BlockchainGUI:
         with open(__file__, 'rb') as file:
             client = file.read()
         self.client_hash = hashlib.sha3_512(client).hexdigest()
+        print(self.client_hash)
         self.root = root
         self.root.title(f"{coin_name} GUI")
         self.mining = False
@@ -193,12 +194,11 @@ class BlockchainGUI:
         url = localip+'/check_client'
         data = {
             'client_hash': self.client_hash,
-            'coin_name': coin_name,
             'client_wallet': self.wallet.public_key
         }
         response = requests.post(url, json=data)
-        if response.status_code == 200 and response.json().get('status') == 'success':
-            return
+        if response.status_code == 200:
+            return 200
         else:
             print("Failure to verify client.")
             sys.exit(1)
@@ -283,6 +283,7 @@ class BlockchainGUI:
                 difficulty = difficulty_response['difficulty']
                 target = difficulty_response['target']
                 max_base = difficulty_response['max_base']
+                transactions = difficulty_response['transactions']
             else:
                 print("Failed to fetch difficulty.")
                 return
@@ -298,14 +299,7 @@ class BlockchainGUI:
             else:
                 print("Failed to fetch the latest block.")
                 return
-            response = requests.get(localip+'/transactions')
-            if response.status_code == 200:
-                transactions = response.json()
-                transactions_data = json.dumps(transactions)
-            else:
-                print("Failed to fetch previous transactions.")
-                return
-            data = f"{previous_hash}{transactions_data}"
+            data = f"{previous_hash}{transactions}"
             start_time = time.time()
             result = hashlib.sha3_512(data.encode()).hexdigest()
             time.sleep(0.001)
@@ -337,19 +331,6 @@ class BlockchainGUI:
                 print("Failed to add block to the blockchain.")
                 self.stop_mining()
 
-        def mine():
-            start_time = time.time()
-            while self.mining:
-                data = f"GENESIS{coin_name}GENESIS"
-                result = send_transaction(data, self.wallet.public_key)
-                end_time = time.time()
-                time_diff = end_time - start_time
-                if time_diff == 0:
-                    self.hash_rate = float('inf')
-                else:
-                    self.hash_rate = 1 / (end_time - start_time)
-                print(result)
-        threading.Thread(target=mine).start()
         
     def update_hash_rate(self):
         self.hash_rate_label.config(text=f"Hash Rate: {self.hash_rate} H/s")

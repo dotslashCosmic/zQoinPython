@@ -7,7 +7,7 @@ from client import BlockchainGUI
 client_port = 5317
 host_port = 5318
 full_name = "zQoin"
-client_version = "2e6ab0376ea2feae2bdc0734cf03304f3cc9623f9d74ab1363633f4ba493fa71d248e53819d1dffe120d75370e1fd1edd5da9da7f5a245df66c36ee320d618fe"
+client_version = "475b3ae250cdc5d4495b64627109f4dd84acfb3df0970563a39f5703968d04bd07b19a40233a4e1b5e64dc74f7690d5ab3a1c58d4e9173d393a4063310f38639"
 
 class Block:
     def __init__(self, index, previous_hash, timestamp, data, hash, nonce):
@@ -66,7 +66,7 @@ class Blockchain:
                     block['index'],
                     block['timestamp'],
                     block['previous_hash'],
-                    block.get('data', 'GENESISzQoinGENESIS'),
+                    block.get('data', f'GENESIS{full_name}GENESIS'),
                     block['hash'],
                     block['nonce'],
                 ) for block in data['chain']]
@@ -93,7 +93,7 @@ class Blockchain:
         difficulty = base_difficulty + additional_difficulty + exponential_difficulty
         target = '0' * int(difficulty)
         if difficulty >= max_base:
-            print(f"Reached the maximum limit of {index} zQoin in circulation.")
+            print(f"Reached the maximum limit of {index} {full_name} in circulation.")
         return difficulty, target, max_base
         
     def get_latest_block(self):
@@ -158,11 +158,14 @@ print("Blockchain initialized.\nCurrent block:", blockchain.get_latest_index(), 
 @app.route('/difficulty', methods=['GET'])
 def get_difficulty():
     difficulty, target, max_base = blockchain.get_difficulty_and_target()
+    transactions = []    
     if difficulty >= max_base:
-        print(f"Reached the maximum limit of zQoin in circulation.")
-        return jsonify({'difficulty': None, 'target': None})
+        print(f"Reached the maximum limit of {full_name} in circulation.")
+        return jsonify({'difficulty': None, 'target': None, 'max_base': None, 'transactions': None})
     else:
-        return jsonify({'difficulty': difficulty, 'target': target, 'max_base': max_base})
+        for block in blockchain.chain:
+            transactions.append(block.data)
+        return jsonify({'difficulty': difficulty, 'target': target, 'max_base': max_base, 'transactions': transactions})
 
 @app.route('/transactions', methods=['POST'])
 def add_transaction():
@@ -261,13 +264,12 @@ def latest_block():
 def check_client():
     data = request.get_json()
     client_hash = data.get('client_hash')
-    coin_name = data.get('coin_name')
     client_wallet = data.get('client_wallet')
-    if client_hash == client_version and coin_name == full_name:
-        return jsonify({"status": "success"}), print(f"{client_wallet} is verified.")
+    if client_hash == client_version:
+        return jsonify({"message": "Client verified"}), 200
     else:
         #On failure, remove the wallet that was just created, if there was a creation that just happened with that wallet address
-        return jsonify({"status": "failure"}), print(f"{client_wallet} failure to verify: {client_hash}")
+        return jsonify({"message": "Client verification failed"}), 400
         
 @app.route('/wallet_exists', methods=['POST'])
 def wallet_exists():
@@ -344,5 +346,5 @@ def add_amount():
     return jsonify({'message': 'Amount added successfully'})
     
 if __name__ == '__main__':
-    print("zQoin Node Initialized.")
+    print(f"{full_name} Node Initialized.")
     app.run(port=host_port)
