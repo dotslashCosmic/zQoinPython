@@ -1,43 +1,46 @@
 #Author: dotslashCosmic
-import sys
+import threading, time, requests, json, hashlib, os, binascii, secrets, sys
 import tkinter as tk
 from flask import Flask, request, jsonify
 from tkinter import simpledialog
 from tkinter import messagebox
 from datetime import datetime
-import threading, time, requests, json, hashlib, os, binascii, secrets
 
-client_port = 5317
-host_port = 5318
-localip = f'http://127.0.0.1:{host_port}'
-localhost = f'http://localhost:{host_port}'
-coin_name = 'zQoin'
-short_name = 'zqn'
-if not len(short_name) == 3:
-   print("Short name must be 3 characters. Defaulting.")
-   short_name = 'zqn'
+client_port = 5317 #int, 1-65535
+host_port = 5318 #int, 1-65535
+if client_port == host_port:
+    print("Client and host port cannot be the same.")
+    sys.exit(1)
+server_ip = f'http://127.0.0.1:{host_port}' #Server IP
+wallet_list = 'https://raw.githubusercontent.com/dotslashCosmic/zQoinPython/main/wordlist/en.txt' #Wallet creation wordlist
+block_flood_limit = 2 #float, To prevent block flooding, sleep, needs to move to server
+coin_name = 'zQoin' #Coin full name
+short_name = 'zqn' #Coin short name(lowercase/numbers)
+if not (1 <= len(short_name) <= 5 and all(char.islower() or char.isdigit() for char in short_name)):
+    print("Short name must be between 1 and 5 characters and only contain lowercase letters and digits.")
+    sys.exit(1)
 
 def generate_entropy(bits=128):
     return secrets.token_bytes(bits // 8)
 
 def entropy_to_mnemonic(entropy):
-    entropy_bits = bin(int.from_bytes(entropy, byteorder='big'))[2:].zfill(len(entropy) * 8)
-    checksum_length = len(entropy_bits) // 32
-    checksum = bin(int(hashlib.sha256(entropy).hexdigest(), 16))[2:].zfill(256)[:checksum_length]
-    bits = entropy_bits + checksum
-    response = requests.get('https://raw.githubusercontent.com/bitcoin/bips/master/bip-0039/english.txt')
+    response = requests.get(wallet_list)
     if response.status_code == 200:
         wordlist = response.text.splitlines()
     else:
         print("Failed to fetch wordlist.")
         return None
+    entropy_bits = bin(int.from_bytes(entropy, byteorder='big'))[2:].zfill(len(entropy) * 8)
+    checksum_length = len(entropy_bits) // 32
+    checksum = bin(int(hashlib.sha3_512(entropy).hexdigest(), 16))[2:].zfill(512)[:checksum_length]
+    bits = entropy_bits + checksum
     words = [wordlist[int(bits[i:i+11], 2)] for i in range(0, len(bits), 11)]
     return ' '.join(words)
 
 def mnemonic_to_seed(mnemonic, passphrase=''):
     mnemonic = mnemonic.encode('utf-8')
     salt = ('mnemonic' + passphrase).encode('utf-8')
-    return hashlib.pbkdf2_hmac('sha512', mnemonic, salt, 2048, dklen=64)
+    return hashlib.pbkdf2_hmac('sha3_512', mnemonic, salt, 2048, dklen=64)
 
 class Wallet:
     def __init__(self, nickname, amount=0):
@@ -53,10 +56,11 @@ class Wallet:
         return hashlib.sha3_512(seed).hexdigest()
 
     def generate_public_key(self, private_key):
-        return short_name + hashlib.sha3_512(private_key.encode('utf-8')).hexdigest()[-61:]
+        hash_length = 64 - len(short_name)
+        return short_name + hashlib.sha3_512(private_key.encode('utf-8')).hexdigest()[-hash_length:]
 
     def save_keys(self):
-        url = localhost+'/wallet_exists'
+        url = server_ip+'/wallet_exists'
         response = requests.post(url, json={'public_key': self.public_key})
         if not response.json().get('exists'):
             wallet_data = {
@@ -67,7 +71,8 @@ class Wallet:
                 'nickname': self.nickname,
                 'amount': '0',
             }
-            url = localhost+'/create_wallet'
+            print("Generating wallet...")
+            url = server_ip+'/create_wallet'
             response = requests.post(url, json=[wallet_data])
             if response.status_code == 200:
                 with open('wallet.json', 'w') as f:
@@ -77,7 +82,7 @@ class Wallet:
                 return
 
     def load_keys(self):
-        url = localhost+'/get_wallet'
+        url = server_ip+'/get_wallet'
         response = requests.post(url, json={'public_key': self.public_key})
         if response.status_code == 200:
             keys = response.json()
@@ -109,20 +114,20 @@ def create_transaction(sender, receiver, amount, private_key):
 
 def sign_transaction(transaction, private_key):
     transaction_string = json.dumps(transaction, sort_keys=True)
-    return hashlib.sha3_512((transaction_string + private_key).encode('utf-8')).hexdigest()
+    return hashlib.sha3_512((transaction_string+private_key).encode('utf-8')).hexdigest()
 
 def submit_transaction(transaction):
-    url = localhost + '/transactions'
+    url = server_ip+'/transactions'
     response = requests.post(url, json=transaction)
     return response.json()
 
 def get_blockchain_state():
-    url = localhost + '/blocks'
+    url = server_ip+'/blocks'
     response = requests.get(url)
     return response.json()
 
 def send_transaction(transaction, wallet_address):
-    url = localhost + '/send_transaction'
+    url = server_ip+'/send_transaction'
     payload = {
         'transaction': {
             'sender': transaction['sender'],
@@ -134,7 +139,7 @@ def send_transaction(transaction, wallet_address):
     response = requests.post(url, json=payload)
 
 def get_index():
-    response = requests.get(localip + '/index')
+    response = requests.get(server_ip+'/index')
     if response.status_code == 200:
         data = response.json()
         index = data['index']
@@ -146,7 +151,8 @@ class BlockchainGUI:
         with open(__file__, 'rb') as file:
             client = file.read()
         self.client_hash = hashlib.sha3_512(client).hexdigest()
-        print(self.client_hash)
+        print("Client version:", self.client_hash)
+        self.check_hash_with_server()
         self.root = root
         self.root.title(f"{coin_name} GUI")
         self.mining = False
@@ -158,7 +164,7 @@ class BlockchainGUI:
             self.wallet = Wallet(keys['nickname'], keys['amount'])
             self.wallet.private_key = keys['private_key']
             self.wallet.public_key = keys['public_key']
-            response = requests.post(localip+'/get_wallet', json={'public_key': self.wallet.public_key})
+            response = requests.post(server_ip+'/get_wallet', json={'public_key': self.wallet.public_key})
             response_keys = response.json()
             if not (self.wallet.private_key == response_keys['private_key'] and 
                     self.wallet.public_key == response_keys['public_key'] and 
@@ -171,7 +177,6 @@ class BlockchainGUI:
                 return
             self.wallet = Wallet(nickname)
             self.wallet.save_keys()
-        self.check_hash_with_server()
         self.sender_wallet_label = tk.Label(root, text=f"Welcome to {coin_name} Client\nCurrent Wallet: {self.wallet.nickname}\nAmount: {self.wallet.amount} {coin_name}\n\t\t\t\t\t\t")
         self.sender_wallet_label.pack(pady=10)
         self.sender_wallet_entry = tk.Entry(root)
@@ -191,10 +196,9 @@ class BlockchainGUI:
         self.update_hash_rate()
 
     def check_hash_with_server(self):
-        url = localip+'/check_client'
+        url = server_ip+'/check_client'
         data = {
             'client_hash': self.client_hash,
-            'client_wallet': self.wallet.public_key
         }
         response = requests.post(url, json=data)
         if response.status_code == 200:
@@ -273,24 +277,25 @@ class BlockchainGUI:
         transaction = create_transaction(self.wallet.public_key, receiver, str(amount))
         result = send_transaction(transaction, self.wallet.public_key)
         messagebox.showinfo("Mining Result", result)
-        
+
     def mine(self):
         index = 0
         while self.mining:
-            response = requests.get(localip + '/difficulty')
+            response = requests.get(server_ip+'/difficulty')
             if response.status_code == 200:
                 difficulty_response = response.json()
                 difficulty = difficulty_response['difficulty']
                 target = difficulty_response['target']
                 max_base = difficulty_response['max_base']
                 transactions = difficulty_response['transactions']
+                nonce = difficulty_response['nonce']
             else:
                 print("Failed to fetch difficulty.")
                 return
             if index >= max_base:
                 print(f"Reached the maximum limit of {coin_name} in circulation. Stopping mining.")
                 break
-            response = requests.get(localip+"/blocks")
+            response = requests.get(server_ip+"/blocks")
             if response.status_code == 200:
                 blocks = response.json()
                 previous_block = blocks[-1]
@@ -299,12 +304,14 @@ class BlockchainGUI:
             else:
                 print("Failed to fetch the latest block.")
                 return
-            data = f"{previous_hash}{transactions}"
-            start_time = time.time()
-            result = hashlib.sha3_512(data.encode()).hexdigest()
-            time.sleep(0.001)
+            start_time = int(time.time())
+            form_time = datetime.fromtimestamp(int(start_time)).strftime('%m/%d/%Y %H:%M:%S')
+            print(f"PoW for block {previous_index} starting at {form_time}...")
+            nonce, new_hash, new_transactions = self.proof_of_work(previous_index, previous_hash, start_time, transactions, nonce, difficulty)
+            data = f"{new_hash}{new_transactions}{nonce+1}"
             end_time = time.time()
             time_diff = end_time - start_time
+            print(f"Time to mine block {previous_index}: {time_diff}s")
             if time_diff == 0:
                 self.hash_rate = float('inf')
             else:
@@ -318,20 +325,44 @@ class BlockchainGUI:
             last_10_hashes = first_hash+str(hashes[-10:])
             block_data = {
                 'data': last_10_hashes,
-                'hash': result,
+                'new_nonce': nonce,
+                'new_hash': new_hash,
+                'new_transactions': new_transactions,
                 'hash_rate': self.hash_rate,
                 'miner': self.wallet.public_key
             }
-            response = requests.post(localip+'/add_block', json=block_data)
+            time.sleep(block_flood_limit)
+            response = requests.post(server_ip+'/add_block', json=block_data)
             if response.status_code == 200:
                 block_time = datetime.fromtimestamp(int(end_time)).strftime('%m/%d/%Y %H:%M:%S')
-                print(f"Block {previous_index+1} mined at difficulty {difficulty}!\nMined data: {result}")
-                index += 1
+                print(f"Block {previous_index+1} mined at difficulty {difficulty} at {block_time}!\nMined data: {new_hash}")
+                previous_index + 1
             else:
-                print("Failed to add block to the blockchain.")
-                self.stop_mining()
+                message = response.json().get('message')
+                if message == "Block flooding detected.":
+                    print("Block flooding detected.")
+                    self.stop_mining()
+                elif message == "Consensus not reached.":
+                    print("Consensus sent.")
+                    self.stop_mining()
+                elif message == "Block declined due to connection error.":
+                    print("Block declined due to connection error.")
+                    self.stop_mining()
+                else:
+                    print("Failed to add block to the blockchain.")
+                    self.stop_mining()
 
-        
+    def calculate_hash(self, index, previous_hash, start_time, transactions, nonce):
+        value = str(index)+str(previous_hash)+str(start_time)+str(transactions)+str(nonce)
+        return hashlib.sha3_512(value.encode('utf-8')).hexdigest()
+
+    def proof_of_work(self, index, previous_hash, start_time, transactions, nonce, difficulty):
+        for _ in range(difficulty):
+            proof_hash = hashlib.sha3_512(f"{index}{previous_hash}{start_time}{transactions}{nonce}{difficulty}".encode('utf-8')).hexdigest()
+            nonce += 1
+            hash = hashlib.sha3_512(f"{index}{proof_hash}{start_time}{transactions}{nonce}{difficulty}".encode('utf-8')).hexdigest()     
+        return nonce, hash, transactions
+            
     def update_hash_rate(self):
         self.hash_rate_label.config(text=f"Hash Rate: {self.hash_rate} H/s")
         self.root.after(1000, self.update_hash_rate)
@@ -356,9 +387,9 @@ def update_wallet():
         with open('wallet.json', 'w') as file:
             json.dump(data, file, indent=4)
         gui.sender_wallet_label.config(text=f"Welcome to {coin_name} Client\nCurrent Wallet: {gui.wallet.nickname}\nAmount: {new_amount} {coin_name}\n\t\t\t\t\t\t")
-        return jsonify({"message": f"Mining pool rewarded {address}!"}), 200
+        return jsonify({"message": f"Mining pool rewarded {address} {reward} {coin_name}!"}), 200
     else:
-        print("Wallet update failed.")
+        return jsonify({"message": "Wallet update for {address} failed. Reward queue?"}), 400
 
 def run_flask_app():
     app.run(port=client_port)
