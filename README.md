@@ -1,18 +1,80 @@
-Host.py starts the crypto node and hosts the blockchain and wallets, 
 
-Client.py mines zQoin crypto, as well as sends/recieves to wallets(next step!)
+# zQoin Cryptocurrency Project
 
-Calculate.py calculates the maximum supply of coins based on difficulty vars
+## Overview
+This project is a simple implementation of a cryptocurrency named zQoin. It includes a blockchain, wallets, and mining functionality. The project is divided into three main components:
+- `host.py`: Starts the crypto node and hosts the blockchain and wallets.
+- `client.py`: Mines zQoin crypto, and sends/receives transactions to/from wallets.
+- `calculate.py`: Calculates the maximum supply of coins based on difficulty variables. (outdated)
 
-Includes [DotSlashVerify](https://github.com/dotslashCosmic/DotSlashVerify) hashes for the files
+## Features
+- **Blockchain**: A basic implementation of a blockchain to manage transactions and mining.
+- **Wallets**: Create and manage wallets for storing zQoin.
+- **Mining**: Mine zQoin using the `client.py` script.
+- **Full Customizability**: Variables all ready to customize, in an easy to read format.
 
-Stupid little project I felt like making today, might make something out of it
-- I'm going to try to make an actual cryptocurrency, gl me
-- 7/27 got the mining pool woo
+## Installation
+To run this project, you need to have Python installed. Additionally, you need to install the following dependencies:
+```bash
+$ pip install flask tkinter
+```
 
-Requires $ pip install flask & tkinter
+## Usage
+### Starting the Crypto Node
+To start the crypto node and host the blockchain and wallets, run:
+```bash
+$ python host.py
+```
 
-To customize:
-- in client.py, change: coin_name, short_name, client_port, host_port, server_ip, wallet_list, and block_flood_limit 
-- sha3-512 client.py
-- in host.py, change: client_port, host_port, coin_name, reward, time_between_rewards, consensus_count, genesis_token, and client_version with the client.py sha3-512 hash
+### Mining zQoin
+To mine zQoin, run:
+```bash
+$ python client.py
+```
+
+### Calculating Maximum Supply
+Outdated.
+To calculate the maximum supply of zQoin, run:
+```bash
+$ python calculate.py
+```
+
+## Customization
+You can customize various parameters in the `client.py` and `host.py` files:
+- **client.py**:
+  - `coin_name` Coin full name
+  - `short_name` Coin short name
+  - `client_port` 1-65535, integer 
+  - `host_port` 1-65535, integer (cannot match client port)
+  - `server_ip` Host server IP
+- **host.py**:
+  - `client_port` 1-65535, integer
+  - `host_port` 1-65535, integer (cannot match client port)
+  - `base` Base difficulty
+  - `max_base` Maximum difficulty
+  - `a, b, c, d, e` Variables affecting speed of mining
+  - `max_coin` Maximum amount of coins in circulation, ~462mb per 1m max_coin/reward, ~580 bytes per wallet
+  - `reward` Base reward per block, float
+  - `time_between_rewards` Minimum seconds between blocks
+  - `consensus_count` How many validations is required to save block
+  - `coin_name` Coin full name
+  - `short_name` Coin short name
+  - `wallet_list_url` Wallet creation word list
+  - `host_version_url` SHA3-512 of this file
+  - `check` Validates the host against host version url hash
+  - `client_version` with the `client.py` `sha3-512` hash
+  - `genesis_token` Genesis block token
+
+## File Verification
+This project includes [DotSlashVerify](https://github.com/dotslashCosmic/DotSlashVerify) hashes for the files to ensure their integrity.
+
+## Contributing
+Feel free to fork this project, submit issues and pull requests. Contributions are welcome!
+
+## License
+This project is licensed under the GPL-3.0 License.
+
+### Milestones
+- **7/27**: Got the mining pool working, woo!
+
+---
