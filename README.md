@@ -15,8 +15,15 @@ This project is a simple implementation of a cryptocurrency named zQoin. It incl
 
 ## Installation
 To run this project, you need to have Python installed. Additionally, you need to install the following dependencies:
-```bash
-$ pip install flask tkinter
+
+For the client and host:
+```
+$ pip install flask
+$ pip install tkinter
+```
+Host only:
+```
+$ pip install flask-limiter
 ```
 
 ## Usage
