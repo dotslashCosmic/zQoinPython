@@ -1,5 +1,5 @@
 #Author: dotslashCosmic
-import threading, time, requests, json, hashlib, os, binascii, secrets, sys
+import threading, time, requests, json, hashlib, os, binascii, secrets, sys, uuid
 import tkinter as tk
 from flask import Flask, request, jsonify
 from tkinter import simpledialog
@@ -8,12 +8,16 @@ from datetime import datetime
 
 client_port = 5317 #int, 1-65535
 host_port = 5318 #int, 1-65535
-if client_port == host_port:
-    print("Client and host port cannot be the same.")
-    sys.exit(1)
 server_ip = f'http://127.0.0.1:{host_port}' #Server IP, future update
 coin_name = 'zQoin' #Coin full name
 short_name = 'zqn' #Coin short name(lowercase/numbers)
+
+for port, p_name in [(client_port, "Client"), (host_port, "Host")]:
+    if not isinstance(port, int) or not (1 <= port <= 65535):
+        print(f"{p_name} port {port} is not a valid port number. It must be an integer between 1 and 65535.")
+        sys.exit(1)
+if client_port == host_port:
+    print(f"Client port {client_port} and host port {host_port} cannot be the same.")
 if not (1 <= len(short_name) <= 5 and all(char.islower() or char.isdigit() for char in short_name)):
     print("Short name must be between 1 and 5 characters and only contain lowercase letters and digits.")
     sys.exit(1)
@@ -35,7 +39,12 @@ class Wallet:
         self.public_key = self.generate_public_key(self.private_key)
         self.nickname = nickname
         self.amount = amount
-
+        
+    def trust_hash(self):
+        mac_address = ':'.join(['{:02x}'.format((uuid.getnode() >> elements) & 0xff) for elements in range(0, 2*6, 2)][::-1])
+        trust_hash = hashlib.sha3_512((mac_address + self.public_key).encode()).hexdigest()
+        return trust_hash
+        
     def fetch_mnemonic(self):
         response = requests.get(server_ip + '/wallet_list')
         if response.status_code == 200:
@@ -54,6 +63,7 @@ class Wallet:
     def save_keys(self):
         url = server_ip+'/wallet_exists'
         response = requests.post(url, json={'public_key': self.public_key})
+        f_amount = '{:.{}f}'.format(0, decimals)
         if not response.json().get('exists'):
             wallet_data = {
                 'mnemonic': self.mnemonic,
@@ -62,8 +72,15 @@ class Wallet:
                 'public_key': self.public_key,
                 'nickname': self.nickname,
                 'coin_name': coin_name,
-                'amount': '0',
+                'amount': f_amount
             }
+            trust = tk.Tk()
+            trust.withdraw()  # Hide the main window
+            result = messagebox.askyesno("Trust This Device", f"Do you want to save this computer as a trusted source for {self.public_key}?")
+            if result:
+                wallet_data['trust_hash'] = self.trust_hash()
+            else:
+                wallet_data['trust_hash'] = False
             print("Generating wallet...")
             url = server_ip+'/create_wallet'
             response = requests.post(url, json=[wallet_data])
@@ -76,8 +93,9 @@ class Wallet:
                 return
 
     def load_keys(self):
+        is_trusted = self.trust_hash()
         url = server_ip+'/get_wallet'
-        response = requests.post(url, json={'public_key': self.public_key})
+        response = requests.post(url, json={'public_key': self.public_key, 'trust_hash': is_trusted})
         if response.status_code == 200:
             keys = response.json()
             self.private_key = keys['private_key']
@@ -115,7 +133,7 @@ class BlockchainGUI:
         with open(__file__, 'rb') as file:
             client = file.read()
         self.client_hash = hashlib.sha3_512(client).hexdigest()
-        print("Client version:", self.client_hash)
+        print(self.client_hash)
         self.check_hash_with_server()
         self.root = root
         self.root.title(f"{coin_name} GUI")
@@ -130,6 +148,7 @@ class BlockchainGUI:
             self.wallet.public_key = keys['public_key']
             response = requests.post(server_ip+'/get_wallet', json={'public_key': self.wallet.public_key})
             response_keys = response.json()
+            print(response_keys)
             if not (self.wallet.public_key == response_keys['public_key']):
                 return print("Fake/non-existent wallet.")
         else:
@@ -154,13 +173,20 @@ class BlockchainGUI:
         self.update_hash_rate()
 
     def check_hash_with_server(self):
-        url = server_ip+'/check_client'
+        global decimals
+        url = server_ip + '/check_client'
         data = {
-            'client_hash': self.client_hash,
+            'client_hash': self.client_hash
         }
         response = requests.post(url, json=data)
         if response.status_code == 200:
-            return 200
+            response_json = response.json()
+            if 'decimals' in response_json:
+                decimals = response_json['decimals']
+                return decimals
+            else:
+                print("Decimal key not found in the response.")
+                sys.exit(1)
         else:
             print("Failure to verify client.")
             sys.exit(1)
