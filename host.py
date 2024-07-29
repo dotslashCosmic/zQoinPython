@@ -28,7 +28,7 @@ wallet_list_url = "https://raw.githubusercontent.com/dotslashCosmic/zQoinPython/
 host_version_url = "https://raw.githubusercontent.com/dotslashCosmic/zQoinPython/main/hash/host.sha3_512" #SHA3-512 of this file
 check = True #Bool, validate host/client with host_version_url/client_version
 local = True #Bool, Allows local IPs
-client_version = "dac7f3c598177f7b7f3b1d89bce5cdf8a3703aa5f007b8b66aa64a041a28851933bb0dab5398fb7cf63bae44c2b45b6d6636d9d64c16d14f978c084a8e60bdfa" #SHA3-512 of client.py
+client_version = "b43c381f24f39a8e7b1f69090f423f82d99905239f93aff403f5d47aaa48cc2374eec5b615937e4b404900bb7bf8663aa85668d8c85b65db290ec280a49046ea" #SHA3-512 of client.py
 genesis_token = f'{client_version}{coin_name}GENESIS' #Genesis block
 
 def create_genesis_block():
