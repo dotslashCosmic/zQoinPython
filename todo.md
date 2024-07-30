@@ -1,15 +1,13 @@
 #Potential TODO List
 
 ## Blockchain problems
-1. **51% Attack Protection**: Malicious majority of the blockchain can lead to manipulating transactions, executing double-spending schemes, or disrupting the validation of new transactions.
-  - 1a. **Practical Byzantine Fault Tolerance**: PBFT is designed to achieve consensus even in the presence of faulty or malicious nodes. It involves a series of communication rounds between nodes and is known for its low-latency finality, making it suitable for private or consortium blockchains.
-2. **High Energy Consumption**: Mining activities for cryptocurrencies consume a significant amount of energy. This has raised environmental concerns and calls for more sustainable alternatives.
-  - 2a. **Proof of Burn**: Potentially go PoW to PoB, triggers at max coins infinitely.
-  - 2b. **Proof of Stake**: Potentially go PoW to PoS once max coins are reached.
-5. **Fair Distribution Mechanisms**: Implement fair distribution mechanisms such as airdrops or initial coin offerings that target a broader audience, including those with lower incomes or late adapters.
-6. **Layer 1 and 2 Solutions**: Utilize Layer scaling solutions like sidechaining, or the Lightning Network for Bitcoin or Optimistic Rollups for Ethereum. These solutions process transactions off-chain and then settle them on-chain, reducing congestion.
-  - 6a. **Sharding**: Implement sharding, which divides the blockchain into smaller, more manageable pieces (shards) that can process transactions in parallel.
-7. **Zero-Knowledge Proofs**: Potentially implement zero-knowledge proofs (e.g., zk-SNARKs) to enhance privacy without compromising security.
+1. **High Energy Consumption**: Mining activities for cryptocurrencies consume a significant amount of energy. This has raised environmental concerns and calls for more sustainable alternatives.
+  - 1a. **Proof of Burn**: Potentially go PoW to PoB, triggers at max coins infinitely.
+  - 1b. **Proof of Stake**: Potentially go PoW to PoS once max coins are reached.
+2. **Fair Distribution Mechanisms**: Implement fair distribution mechanisms such as airdrops or initial coin offerings that target a broader audience, including those with lower incomes or late adapters.
+3. **Layer 1 and 2 Solutions**: Utilize Layer scaling solutions like sidechaining, or the Lightning Network for Bitcoin or Optimistic Rollups for Ethereum. These solutions process transactions off-chain and then settle them on-chain, reducing congestion.
+  - 3a. **Sharding**: Implement sharding, which divides the blockchain into smaller, more manageable pieces (shards) that can process transactions in parallel.
+4. **Zero-Knowledge Proofs**: Potentially implement zero-knowledge proofs (e.g., zk-SNARKs) to enhance privacy without compromising security.
  
 ## Todo list (priority order)
 1. **Encrypt Private Keys**: Implement AES encryption for storing private keys in `wallet.json`.
