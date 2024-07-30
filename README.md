@@ -2,13 +2,15 @@
 # zQoin Cryptocurrency Project
 
 ## Overview
-This project is a simple implementation of a cryptocurrency named zQoin. It includes a blockchain, wallets, and mining functionality. The project is divided into three main components:
+This project is a simple implementation of a cryptocurrency named zQoin, based on SHA3-512 Proof of Work.
+It includes a blockchain, wallets, and mining functionality. The project is divided into three main components:
 - `host.py`: Starts the crypto node and hosts the blockchain and wallets.
 - `client.py`: Mines zQoin crypto, and sends/receives transactions to/from wallets.
 - `calculate.py`: Calculates the maximum supply of coins based on difficulty variables. (outdated)
 
 ## Features
 - **Blockchain**: A basic implementation of a blockchain to manage transactions and mining.
+- **Node Integration**: PBFT fault tolerence between P2P nodes that host the blockchain.
 - **Wallets**: Create and manage wallets for storing zQoin.
 - **Mining**: Mine zQoin using the `client.py` script.
 - **Full Customizability**: Variables all ready to customize, in an easy to read format.
@@ -55,6 +57,8 @@ You can customize various parameters in the `client.py` and `host.py` files:
   - `host_port` 1-65535, integer (cannot match client port)
   - `server_ip` Host server IP
 - **host.py**:
+  - `coin_name` Coin full name
+  - `short_name` Coin short name
   - `client_port` 1-65535, integer
   - `host_port` 1-65535, integer (cannot match client port)
   - `base` Base difficulty
@@ -64,11 +68,12 @@ You can customize various parameters in the `client.py` and `host.py` files:
   - `reward` Base reward per block, float
   - `time_between_rewards` Minimum seconds between blocks
   - `consensus_count` How many validations is required to save block
-  - `coin_name` Coin full name
-  - `short_name` Coin short name
   - `wallet_list_url` Wallet creation word list
   - `host_version_url` SHA3-512 of this file
   - `check` Validates the host against host version url hash
+  - `node_consensus` Minimum nodes for consensus verification
+  - `node_tolerance` Tolerance for faulty/malicious nodes
+  - `local` Allows local IPs
   - `client_version` with the `client.py` `sha3-512` hash
   - `genesis_token` Genesis block token
 
