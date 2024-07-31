@@ -1,4 +1,4 @@
-#Author: dotslashCosmic
+#Author: dotslashCosmic v0.1.0
 import threading, time, requests, json, hashlib, os, binascii, secrets, sys, uuid
 import tkinter as tk
 from flask import Flask, request, jsonify
@@ -148,7 +148,6 @@ class BlockchainGUI:
             self.wallet.public_key = keys['public_key']
             response = requests.post(server_ip+'/get_wallet', json={'public_key': self.wallet.public_key})
             response_keys = response.json()
-            print(response_keys)
             if not (self.wallet.public_key == response_keys['public_key']):
                 return print("Fake/non-existent wallet.")
         else:
@@ -250,8 +249,8 @@ class BlockchainGUI:
             start_time = int(time.time())
             form_time = datetime.fromtimestamp(int(start_time)).strftime('%m/%d/%Y %H:%M:%S')
             print(f"PoW for block {new_index} at difficulty {difficulty} starting at {form_time}...")
-            nonce, new_hash, new_transactions = self.proof_of_work(new_index, previous_hash, start_time, transactions, nonce, difficulty)
-            data = f"{new_hash}{new_transactions}{nonce+1}"
+            nonce, new_hash, new_transactions, iterations = self.proof_of_work(new_index, previous_hash, start_time, transactions, nonce, difficulty, target)
+            data = f"{new_hash}{new_transactions}{nonce}{iterations}"
             end_time = time.time()
             time_diff = end_time - start_time
             print(f"Time to mine block {new_index}: {time_diff:.2f}s")
@@ -265,14 +264,15 @@ class BlockchainGUI:
             first_hash = block_data['data'].split('[')[0].strip()
             data_part = block_data['data'].split('[')[1].strip(']')
             hashes = [hash.strip().strip('"') for hash in data_part.split(',')]
-            last_10_hashes = first_hash+str(hashes[-10:])
+            last_hashes = first_hash+str(hashes[-3:])
             block_data = {
-                'data': last_10_hashes,
+                'last_hashes': last_hashes,
                 'new_nonce': nonce,
                 'new_hash': new_hash,
                 'new_transactions': new_transactions,
                 'hash_rate': self.hash_rate,
-                'miner': self.wallet.public_key
+                'miner': self.wallet.public_key,
+                'iterations': iterations
             }
             print("Waiting for consensus...")
             response = requests.post(server_ip+'/add_block', json=block_data)
@@ -293,12 +293,14 @@ class BlockchainGUI:
                     print("Failed to add block to the blockchain.")
                     self.stop_mining()
 
-    def proof_of_work(self, index, previous_hash, start_time, transactions, nonce, difficulty):
-        for _ in range(difficulty):
-            proof_hash = hashlib.sha3_512(f"{index}{previous_hash}{start_time}{transactions}{nonce}{difficulty}".encode('utf-8')).hexdigest()
+    def proof_of_work(self, index, previous_hash, start_time, transactions, nonce, difficulty, target):
+        iterations = 0
+        while True:
+            hash = hashlib.sha3_512(f"{index}{previous_hash}{start_time}{transactions}{nonce}".encode('utf-8')).hexdigest()
+            if hash[:difficulty] == target:
+                iterations += 1
+                return nonce, hash, transactions, iterations
             nonce += 1
-            hash = hashlib.sha3_512(f"{index}{proof_hash}{start_time}{transactions}{nonce}{difficulty}".encode('utf-8')).hexdigest()     
-        return nonce, hash, transactions
             
     def update_hash_rate(self):
         self.hash_rate_label.config(text=f"Hash Rate: {self.hash_rate} H/s")
