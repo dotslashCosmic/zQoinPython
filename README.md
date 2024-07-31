@@ -3,16 +3,15 @@
 
 ## Overview
 This project is a simple implementation of a cryptocurrency named zQoin, based on SHA3-512 Proof of Work.
-It includes a blockchain, wallets, and mining functionality. The project is divided into three main components:
-- `host.py`: Starts the crypto node and hosts the blockchain and wallets.
+It includes a blockchain, wallets, and mining functionality. The project is divided into two main components:
+- `host.py`: Starts the blockchain and wallets, interconnected to other nodes by a P2P network.
 - `client.py`: Mines zQoin crypto, and sends/receives transactions to/from wallets.
-- `calculate.py`: Calculates the maximum supply of coins based on difficulty variables. (outdated)
 
 ## Features
 - **Blockchain**: A basic implementation of a blockchain to manage transactions and mining.
 - **Node Integration**: PBFT fault tolerence between P2P nodes that host the blockchain.
 - **Wallets**: Create and manage wallets for storing zQoin.
-- **Mining**: Mine zQoin using the `client.py` script.
+- **Mining**: Mine zQoin as part of a mining pool, using the `client.py` script.
 - **Full Customizability**: Variables all ready to customize, in an easy to read format.
 
 ## Installation
@@ -29,8 +28,8 @@ $ pip install flask-limiter
 ```
 
 ## Usage
-### Starting the Crypto Node
-To start the crypto node and host the blockchain and wallets, run:
+### Starting the Blockchain
+To start the blockchain node, run:
 ```bash
 $ python host.py
 ```
@@ -39,13 +38,6 @@ $ python host.py
 To mine zQoin, run:
 ```bash
 $ python client.py
-```
-
-### Calculating Maximum Supply
-Outdated.
-To calculate the maximum supply of zQoin, run:
-```bash
-$ python calculate.py
 ```
 
 ## Customization
@@ -87,6 +79,9 @@ Feel free to fork this project, submit issues and pull requests. Contributions a
 This project is licensed under the GPL-3.0 License.
 
 ### Milestones
+- **7/19**: Initial commit
+- **7/24**: Full mining and wallet implementation
 - **7/27**: Got the mining pool working, woo!
+- **7/30**: P2P node & fault tolerance
 
 ---
