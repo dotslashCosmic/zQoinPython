@@ -1,5 +1,5 @@
-#Author: dotslashCosmic v0.1.0
-import hashlib, time, json, requests, os, sys, math, secrets, threading
+#Author: dotslashCosmic v0.1.1
+import hashlib, time, json, requests, os, sys, math, secrets
 from flask import Flask, jsonify, request
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -8,30 +8,30 @@ from ipaddress import ip_address
 from urllib.parse import urlparse
 from enum import Enum
 
+#TODO bootup the new get difficulty vars
+
 coin_name = "zQoin" #Coin full name
 short_name = "zqn" #Coin short name(lowercase/numbers, up to 5 chars)
 client_port = 5317 #int 1-65535
 host_port = 5318 #int 1-65535
-base = 100000 #Base difficulty, ~2s @500H/s
-max_base = 1000000000 #Maximum difficulty, ~30m @500H/s
-a = 3 #lower is easier, int 1-1000, Additive, base additive per block
-b = 13 #higher is easier, int 1-100, Additive, Every b blocks, add e
-c = 27 #higher is easier, int 1-100, Additive, Every c blocks, * d
-d = 1.1 #lower is easier, float 1.0-10.0, Exponential multiplier
-e = 3 #lower is easier, int 1-100, How much to add every b blocks
-max_coin = 10000000 #Maximum amount of coins in circulation, ~462mb per 1m max_coin/reward, ~580 bytes per wallet
-reward = 1.00000000 #Base coin reward, float
+base = 1 #Base difficulty
+max_base = 16 #Maximum difficulty
+logarithmic = float(5) # Float 0-10, higher is faster log growth
+linear = float(4) # Float 0-10, higher is for more linear growth
+ramp_factor = float(0.77) # Float 0-1, lower for slower difficulty ramp-up speed
+max_coin = 10000000 #Maximum amount of coins in circulation, ~462mb per 1m max_coin/reward, ~580 bytes per wallet, ~260 bytes per trust wallet
+reward = 10.00000000 #Base coin reward, float
 decimals = 8 #Maximum trailing decimals for reward, int 0-8, absolute limit of 8
-time_between_rewards = 15 #Minimum seconds between blocks, int
+time_between_rewards = 1 #Minimum seconds between blocks, int
 consensus_count = 1 #Minimum verifications for consensus per node
-node_consensus = 2 #Minimum nodes for consensus verification
-node_tolerance = 0 #Tolerance for faulty/malicious nodes
+node_consensus = 1 #Minimum nodes for consensus verification
+node_tolerance = 0 #Tolerance for faulty nodes
 wallet_list_url = "https://raw.githubusercontent.com/dotslashCosmic/zQoinPython/main/wordlist/en.txt" #Wallet creation word list
 host_version_url = "https://raw.githubusercontent.com/dotslashCosmic/zQoinPython/main/hash/host.sha3_512" #SHA3-512 of this file
-check = False #Bool, validate host/client with host_version_url/client_version
+check = True #Bool, validate host/client with host_version_url/client_version
 local = True #Bool, allows local IPs
 node_dns = 'localhost' # DNS resolve to nodes list, in progress
-client_version = "b43c381f24f39a8e7b1f69090f423f82d99905239f93aff403f5d47aaa48cc2374eec5b615937e4b404900bb7bf8663aa85668d8c85b65db290ec280a49046ea" #SHA3-512 of client.py
+client_version = "483dd03d96b4cc769f0aa6c31dce2c3ecdfb1f67189405586a1572f44e5a3fb0e17ba897c135540e9efb9d9d6a3c1310faeee536acc316b0ef43894d064acfd4" #SHA3-512 of client.py
 genesis_token = f'{client_version}{coin_name}GENESIS' #Genesis block
 consensus_results = defaultdict(list) #Initialize
 
@@ -51,15 +51,7 @@ def create_genesis_block():
     })
     return Block(index, previous_hash, timestamp, genesis, hash, nonce)
 
-def entropy_to_mnemonic(entropy, wordlist):
-    entropy_bits = bin(int.from_bytes(entropy, byteorder='big'))[2:].zfill(len(entropy) * 8)
-    checksum_length = len(entropy_bits) // 32
-    checksum = bin(int(hashlib.sha3_512(entropy).hexdigest(), 16))[2:].zfill(512)[:checksum_length]
-    bits = entropy_bits + checksum
-    words = [wordlist[int(bits[i:i+11], 2)] for i in range(0, len(bits), 11)]
-    return ' '.join(words)
-
-def bootup(__file__, check, host_version_url, coin_name, client_port, host_port, a, b, c, e, d, reward, decimals, short_name, time_between_rewards, consensus_count, base, max_base):
+def bootup(__file__, check, host_version_url, coin_name, client_port, host_port, logarithmic, linear, ramp_factor, reward, decimals, short_name, time_between_rewards, consensus_count, base, max_base):
     with open(__file__, 'rb') as file:
         our_version = hashlib.sha3_512(file.read()).hexdigest()
         print(f"Host version: {our_version}")
@@ -85,13 +77,16 @@ def bootup(__file__, check, host_version_url, coin_name, client_port, host_port,
             sys.exit(1)
     if client_port == host_port:
         print(f"Client port {client_port} and host port {host_port} cannot be the same.")
-    for var, name in [(a, "a"), (b, "b"), (c, "c"), (e, "e")]:
-        if not isinstance(var, int) or var < 1:
-            print(f"'{name}' must be an integer and at least 1. Current value: {var}")
-            sys.exit(1)
-        if var > 1e5:
-            print(f"Warning! Variable {name} is very large ({var}). Consider using a smaller value.")
-    if not isinstance(node_consensus, int) or node_consensus < 1:
+    if not isinstance(logarithmic, float) or logarithmic < 0:
+        print(f"'logarithmic' must be a float and at least 0. Current value: {logarithmic}")
+        sys.exit(1)
+    if not isinstance(linear, float) or linear < 0:
+        print(f"'linear' must be a float and at least 0. Current value: {linear}")
+        sys.exit(1)
+    if not isinstance(ramp_factor, float) or ramp_factor < 0:
+        print(f"'ramp_factor' must be a float and at least 0. Current value: {ramp_factor}")
+        sys.exit(1)
+    if not isinstance(node_consensus, int) or node_consensus < 0:
         print(f"'node_consensus' must be an integer and at least 1. Current value: {node_consensus}")
         sys.exit(1)
     if not isinstance(node_tolerance, int) or node_tolerance < 0:
@@ -107,11 +102,6 @@ def bootup(__file__, check, host_version_url, coin_name, client_port, host_port,
     if not isinstance(decimals, int) or not (0 <= decimals <= 8):
         print(f"'decimals' must be an integer between 0 and 8. Current value: {decimals}")
         sys.exit(1)
-    if not isinstance(d, float) or d < 1.0:
-        print(f"'d' must be a float up to decimal {decimals}, and at least 1.0. Current value: {d}")
-        sys.exit(1)
-    if d > 5.0:
-        print(f"Warning! 'd' is very large ({d}). Consider using a smaller value.")
     reward_str = str(reward)
     if '.' in reward_str:
         integer_part, decimal_part = reward_str.split('.')
@@ -136,13 +126,21 @@ def bootup(__file__, check, host_version_url, coin_name, client_port, host_port,
     if not isinstance(base, int) or base < 1:
         print(f"'base' must be an integer and at least 1. Current value: {base}")
         sys.exit(1)
-    if base > 10000000:
-        print(f"Warning! 'base' is very large to start ({base}). Potential MemoryError.")
+    if base > 10:
+        print(f"Warning! 'base' is very large to start ({base}).")
     if not isinstance(max_base, int) or max_base < 1:
         print(f"'max_base' must be an integer and at least 1. Current value: {max_base}")
         sys.exit(1)
-    if max_base > 1000000000:
-        print(f"Warning: 'max_base' is very large ({max_base}). Potential MemoryError.")
+    if max_base > 50:
+        print(f"Warning: 'max_base' is very large ({max_base}).")
+    next_node_id = PBFTNode(0, NodeRole.PRIMARY, node_dns).available_node()
+    if next_node_id is not None:
+        nodes = [PBFTNode(next_node_id, NodeRole.PRIMARY if next_node_id == 0 else NodeRole.REPLICA, node_dns)]
+        role = "PRIMARY" if nodes[0].role == NodeRole.PRIMARY else f"REPLICA {nodes[0].node_id}"
+        print(f"Node {role}")
+    else:
+        print("Failed to initialize P2P node connection.")
+        sys.exit(1)
 
 class NodeRole(Enum):
     PRIMARY = 1
@@ -178,7 +176,7 @@ class PBFTNode:
         for seq_num, messages in self.committed_messages.items():
             digests = [msg.digest for msg in messages]
             if len(set(digests)) > 1:
-                self.alert_malicious(seq_num)
+                self.alert_faulty(seq_num)
                 self.committed_messages[seq_num] = [msg for msg in messages if msg.digest == digests[0]]
                 return False
         #TODO Allow save the blockchain here, then wait/make sure all blockchains are saved before continuing, verify with the rest, and then allow the next block to be available
@@ -187,14 +185,15 @@ class PBFTNode:
         self.synchronize_blockchains()
         return True
 
-    def alert_malicious(self, seq_num):
+    def alert_faulty(self, seq_num):
         digests = [msg.digest for msg in self.committed_messages[seq_num]]
-        malicious_digest = max(set(digests), key=digests.count)
-        malicious_nodes = [msg.node_id for msg in self.committed_messages[seq_num] if msg.digest != malicious_digest]
-        alert_msg = {'seq_num': seq_num, 'message': 'Malicious node detected', 'malicious_nodes': malicious_nodes}
+        faulty_digest = max(set(digests), key=digests.count)
+        faulty_nodes = [msg.node_id for msg in self.committed_messages[seq_num] if msg.digest != faulty_digest]
+        alert_msg = {'seq_num': seq_num, 'message': 'Faulty node detected', 'faulty_nodes': faulty_nodes}
         for node in nodes:
             if node.node_id != self.node_id:
                 url = 'http://'+self.node_resolve+':'+str(host_port)+'/node_alert'
+                print(f"ALERT! ")
                 requests.post(url, json=alert_msg)
         
     def send_all(self, msg):
@@ -278,7 +277,7 @@ class PBFTNode:
                 response = requests.post(url, json={'node_id': self.node_id, 'hashes': last_hashes})
                 if response.status_code == 200:
                     responses.append(response.json())
-        if all(response['hashes'] == last_two_hashes for response in responses):
+        if all(response['hashes'] == last_hashes for response in responses):
             blockchain.save_chain()
         else:
             print("Nodes do not agree on the last two hashes.")
@@ -337,26 +336,31 @@ class Blockchain:
         except FileNotFoundError:
             self.chain.append(create_genesis_block())
             self.balances["0"] = 0
-            
+
     def get_difficulty_and_target(self):
         if self.chain:
             index = self.chain[-1].index
         else:
             index = 0
-        base_difficulty = base + (index * a) 
-        additional_difficulty = int(index // b) * e
-        exponential_difficulty = int((index // c) ** d)
-        difficulty = base_difficulty+additional_difficulty+exponential_difficulty
-        difficulty = int(difficulty)        
-        target = '0' * int(difficulty)
-        if index >= (max_coin/reward) or difficulty >= self.max_base:
-            difficulty, max_base = 1, 2
-            target = '0' * int(difficulty)
+            
+    def get_difficulty_and_target(self):
+        global max_base
+        if self.chain:
+            index = self.chain[-1].index
+        else:
+            index = 0
+        difficulty = int(((math.log(index + base) - 1 * logarithmic) + (index * linear/max_coin)) * ramp_factor) + base
+        difficulty = max(difficulty, base)
+        hex_target = ''.join(format(ord(char), '02x') for char in short_name)
+        target = (hex_target * (difficulty // len(hex_target) + 1))[:difficulty]
+        if index >= max_coin or difficulty >= max_base:
+            difficulty = max_base
+            target = short_name * ((max_base // len(short_name)) + 1)
             limit = True
             return difficulty, target, limit
         limit = False
         return difficulty, target, limit
-        
+
     def get_latest_block(self):
         return self.chain[-1]
 
@@ -378,21 +382,10 @@ limiter = Limiter(
     app=app,
     default_limits=["1 per second"]
 )
-print(f"Welcome to {coin_name}!")
-bootup(__file__, check, host_version_url, coin_name, client_port, host_port, a, b, c, e, d, reward, decimals, short_name, time_between_rewards, consensus_count, base, max_base)
-print(f"Initializing {coin_name} Node...")
-next_node_id = PBFTNode(0, NodeRole.PRIMARY, node_dns).available_node()
-if next_node_id is not None:
-    nodes = [PBFTNode(next_node_id, NodeRole.PRIMARY if next_node_id == 0 else NodeRole.REPLICA, node_dns)]
-    role = "PRIMARY" if nodes[0].role == NodeRole.PRIMARY else f"REPLICA {nodes[0].node_id}"
-    print(f"Node {role}\nLoading blockchain...")
-else:
-    print("Failed to initialize P2P node connection.")
-    sys.exit(1)
+print("Initializing blockchain...")
 blockchain = Blockchain()
 difficulty, target, limit = blockchain.get_difficulty_and_target()
-print(f"Blockchain initialized.\nCurrent block: {blockchain.get_latest_index()}\nNext block difficulty: {difficulty}")
-
+print(f"Current block: {blockchain.get_latest_index()}\nBlock difficulty: {difficulty}")
 @app.route('/difficulty', methods=['GET'])
 @limiter.limit(f"2 per second")
 def get_difficulty():
@@ -440,7 +433,7 @@ def add_block():
             while time.time() - difficulty_time < time_between_rewards:
                 time.sleep(time_between_rewards)
         block_data = request.json
-        data = block_data['data']
+        data = block_data['last_hashes']
         received_nonce = block_data['new_nonce']
         new_hash = block_data['new_hash']
         new_transactions = block_data['new_transactions']
@@ -450,9 +443,15 @@ def add_block():
         previous_block = blockchain.get_latest_block()
         index = previous_block.index + 1
         hash_rate = block_data['hash_rate']
+        iterations = block_data['iterations']
         timestamp = int(time.time())
         previous_hash = previous_block.hash
-        result = (data, received_nonce, new_hash, first_hash)
+        result = {
+        'data': data,
+        'received_nonce': received_nonce,
+        'new_hash': new_hash,
+        'first_hash': first_hash,
+        'iterations': block_data['iterations']}
         if index not in consensus_results:
             consensus_results[index] = {}
         if miner not in consensus_results[index]:
@@ -462,7 +461,7 @@ def add_block():
         matching_results = []
         print(f"Consensus {len(matching_results)+1}/{consensus_count} for block {index} from miner {miner}")
         while time.time() - last_reward_time < time_between_rewards:
-            time.sleep(0.01)
+            time.sleep(0.001)
         for block_index, block_consensus in consensus_results.items():
             if block_index == index:
                 for address, result in block_consensus.items():
@@ -471,17 +470,17 @@ def add_block():
             if time.time() - last_reward_time >= time_between_rewards:
                 received_nonce + 1
                 new_block = Block(index, previous_hash, timestamp, hashlib.sha3_512(data.encode('utf-8')).hexdigest(), new_hash, received_nonce)
-#TODO send to other nodes for consensus
-#TODO Is it malicious? Timing issue between nodes(wait/verify)?
                 blockchain.chain.append(new_block)
                 blockchain.save_chain()
                 if limit == True:
                     reward_per_miner = float(0)
                 elif limit == False:
-                    reward_per_miner = float(f"{(reward ** math.factorial(consensus_count)) / consensus_count:.{decimals}f}")
+                    total_effort = sum(result['iterations'] for result in matching_results)
+                    reward_per_miner = float(f"{(reward * result['iterations'] / total_effort):.{decimals}f}")
+                block_data.pop('iterations', None)
                 print(f"Block {index} mined: {new_hash}\nReward per miner: {reward_per_miner:.{decimals}f} {coin_name}")
                 for address, result in consensus_results[index].items():
-                    data = {
+                    update = {
                         'message': "approved",
                         'address': address,
                         'decimals': decimals,
@@ -496,13 +495,15 @@ def add_block():
                         ip = ip_address(miner_ip)
                         if local == True:
                             print(f"Local check is True, local IPs allowed.")
+                            response = requests.post(f'http://' + miner_ip + ':'+str(client_port)+'/update_wallet', json=update)
                         elif ip.is_private:
                             print(f"Bad IP: {miner_ip}\nBad Port: {client_port}")
                             return jsonify({"message": "Invalid IP address."}), 400
+                        else:
+                            response = requests.post(f'http://' + miner_ip + ':'+str(client_port)+'/update_wallet', json=update)
                     except ValueError as e:
                         print(f"Bad IP: {miner_ip}\nBad Port: {client_port}\nError {e}")
                         return jsonify({"message": "Invalid IP address."}), 400
-                    response = requests.post(f'http://'+miner_ip+':'+str(client_port)+'/update_wallet', json=data)
                     print(f"Sent {reward_per_miner} to {address}, response status: {response.status_code}")
                     if response.status_code == 200:
                         with open('hostwallet.json', 'r') as f:
@@ -593,7 +594,6 @@ def get_wallet():
                 for trust_wallet in trust_wallets:
                     if trust_wallet['public_key'] == public_key and trust_wallet['is_trusted'] == trust_hash:
                         return jsonify({
-                            'private_key': wallet['private_key'],
                             'public_key': wallet['public_key'],
                             'amount': float(wallet['amount'])
                         })
@@ -604,12 +604,11 @@ def get_wallet():
         for wallet in wallets:
             if wallet['public_key'] == public_key:
                 return jsonify({
-                    'private_key': wallet['private_key'],
                     'public_key': wallet['public_key'],
                     'amount': float(wallet['amount'])
                 })
         print("Trust check disabled.")
-        return jsonify({'private_key': wallet['private_key'], 'public_key': wallet['public_key'], 'amount': float(wallet['amount'])}), 200
+        return jsonify({'public_key': wallet['public_key'], 'amount': float(wallet['amount'])}), 200
     return jsonify({'error': 'Wallet not found.'}), 400
 
 @app.route('/create_wallet', methods=['POST'])
@@ -618,9 +617,6 @@ def create_wallet():
     data = request.get_json()
     if isinstance(data, list):
         for wallet_data in data:
-            mnemonic = wallet_data.get('mnemonic')
-            seed = wallet_data.get('seed')
-            private_key = wallet_data.get('private_key')
             public_key = wallet_data.get('public_key')
             nickname = wallet_data.get('nickname')
             r_coin_name = wallet_data.get('coin_name')
@@ -655,9 +651,6 @@ def create_wallet():
                 wallets = []
             formatted_amount = '{:.{}f}'.format(0, decimals)
             wallets.append({
-                'mnemonic': mnemonic,
-                'seed': seed,
-                'private_key': private_key,
                 'public_key': public_key,
                 'nickname': nickname,
                 'amount': formatted_amount
@@ -666,7 +659,7 @@ def create_wallet():
                 json.dump(wallets, f, indent=4)
         return jsonify({'message': f'Wallet {public_key} created!'}), 200
     else:
-        print(f"Malformed wallet: mnemonic: {mnemonic}\nseed: {seed}\nprivate_key: {private_key}\npublic_key: {public_key}\nnickname: {nickname}\namount: {amount}")
+        print(f"Malformed wallet: Public_key: {public_key}\nnickname: {nickname}\namount: {amount}")
         return jsonify({'error': 'Invalid data format.'}), 400
 
 @app.route('/add_amount', methods=['POST'])
@@ -694,21 +687,19 @@ def add_amount():
 def wallet_list():
     response = requests.get(wallet_list_url)
     if response.status_code == 200:
-        wordlist = response.text.splitlines()
-        entropy = secrets.token_bytes(128 // 8)
-        mnemonic = entropy_to_mnemonic(entropy, wordlist)
-        return jsonify({'mnemonic': mnemonic}), 200
+        return wallet_list_url, 200
     else:
         print(f"Response: {response}")
-        return jsonify({'error': 'Failed to fetch wordlist.'}), 500
+        return jsonify({'w': 'Failed to fetch wallet list.'}), 500
+
 
 @app.route('/node_receive', methods=['POST'])
 def receive_message():
     msg = request.get_json()
     node_id = int(request.args.get('node_id'))
     if not nodes[node_id].reached_correct_consensus():
-        print(f"Malicious node {node_id} detected: {msg}")
-        return jsonify({'status': 'Error', 'message': 'Malicious node detected'}), 400
+        print(f"Faulty node {node_id} detected: {msg}")
+        return jsonify({'status': 'Error', 'message': 'Faulty node detected.'}), 400
     nodes[node_id].receive_message(msg)
     return jsonify({'status': 'Success'}), 200
 
@@ -719,8 +710,8 @@ def reply():
     digest = data['digest']
     node_id = data['node_id']
     if not nodes[node_id].reached_correct_consensus():
-        print(f"Malicious node {node_id} failed seq_num {seq_num} with digest {digest}")
-        return jsonify({'status': 'Error', 'message': 'Malicious node detected'}), 400
+        print(f"Faulty node {node_id} failed seq_num {seq_num} with digest {digest}")
+        return jsonify({'status': 'Error', 'message': 'Faulty node detected.'}), 400
     print(f"Node {node_id} reached consensus on seq_num {seq_num} with digest {digest}")
     return jsonify({'status': 'Success'}), 200
 
@@ -729,10 +720,10 @@ def client_request():
     request_data = request.get_json()
     request_str = json.dumps(request_data)
     if not nodes[0].reached_correct_consensus():
-        print(f"Malicious node detected. {request_str}")
-        return jsonify({'status': 'Error', 'message': 'Malicious node detected'}), 400
+        print(f"Faulty node detected. {request_str}")
+        return jsonify({'status': 'Error', 'message': 'Faulty node detected.'}), 400
     nodes[0].pre_prepare(request_str)
-    return jsonify({'status': 'Request sent to primary'}), 200
+    return jsonify({'status': 'Request sent to primary.'}), 200
 
 next_node_val = 0
 @app.route('/next_node', methods=['POST'])
@@ -758,11 +749,12 @@ def node_sync():
     received_hashes = data['hashes']
     last_blocks = blockchain.chain[-5:]
     last_hashes = [block.hash for block in last_blocks]
-    if received_hashes == last_two_hashes:
+    if received_hashes == last_hashes:
         return jsonify({'status': 'success', 'hashes': last_hashes}), 200
     else:
         return jsonify({'status': 'failure', 'hashes': last_hashes}), 400
 
 if __name__ == '__main__':
-    print(f"{coin_name} Node Initialized.")
+    bootup(__file__, check, host_version_url, coin_name, client_port, host_port, logarithmic, linear, ramp_factor, reward, decimals, short_name, time_between_rewards, consensus_count, base, max_base)
+    print(f"{coin_name} node initialized!")
     app.run(port=host_port)
