@@ -55,7 +55,7 @@ You can customize various parameters in the `client.py` and `host.py` files:
   - `host_port` 1-65535, integer (cannot match client port)
   - `base` Base difficulty
   - `max_base` Maximum difficulty
-  - `a, b, c, d, e` Variables affecting speed of mining
+  - `logarithmic, linear, ramp_factor` Variables affecting speed of mining
   - `max_coin` Maximum amount of coins in circulation, ~462mb per 1m max_coin/reward, ~580 bytes per wallet
   - `reward` Base reward per block, float
   - `time_between_rewards` Minimum seconds between blocks
