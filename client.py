@@ -1,4 +1,4 @@
-#Author: dotslashCosmic v0.1.0
+#Author: dotslashCosmic v0.1.1
 import threading, time, requests, json, hashlib, os, binascii, secrets, sys, uuid
 import tkinter as tk
 from flask import Flask, request, jsonify
@@ -8,7 +8,7 @@ from datetime import datetime
 
 client_port = 5317 #int, 1-65535
 host_port = 5318 #int, 1-65535
-server_ip = f'http://127.0.0.1:{host_port}' #Server IP, future update
+node_dns = f'http://127.0.0.1:{host_port}' #Node_dns, future update
 coin_name = 'zQoin' #Coin full name
 short_name = 'zqn' #Coin short name(lowercase/numbers)
 
@@ -22,36 +22,35 @@ if not (1 <= len(short_name) <= 5 and all(char.islower() or char.isdigit() for c
     print("Short name must be between 1 and 5 characters and only contain lowercase letters and digits.")
     sys.exit(1)
 
-def generate_entropy(bits=128):
-    return secrets.token_bytes(bits // 8)
-
-def mnemonic_to_seed(mnemonic, passphrase=''):
-    mnemonic = mnemonic.encode('utf-8')
-    salt = ('mnemonic' + passphrase).encode('utf-8')
-    return hashlib.pbkdf2_hmac('sha3_512', mnemonic, salt, 2048, dklen=64)
+def entropy_to_mnemonic(entropy, wordlist):
+    entropy_bits = bin(int.from_bytes(entropy, byteorder='big'))[2:].zfill(len(entropy) * 8)
+    checksum = bin(int(hashlib.sha3_512(entropy).hexdigest(), 16))[2:].zfill(512)[:(len(entropy_bits) // 32)]
+    bits = entropy_bits+checksum
+    words = [wordlist[int(bits[i:i+11], 2)] for i in range(0, len(bits), 11)]
+    return ' '.join(words)
 
 class Wallet:
     def __init__(self, nickname, amount=0):
-        self.entropy = generate_entropy()
         self.mnemonic = self.fetch_mnemonic()
-        self.seed = mnemonic_to_seed(self.mnemonic)
+        self.seed = hashlib.pbkdf2_hmac('sha3_512', self.mnemonic.encode(), coin_name.encode(), 2048, dklen=64)
         self.private_key = self.generate_private_key(self.seed)
         self.public_key = self.generate_public_key(self.private_key)
         self.nickname = nickname
         self.amount = amount
         
     def trust_hash(self):
-        mac_address = ':'.join(['{:02x}'.format((uuid.getnode() >> elements) & 0xff) for elements in range(0, 2*6, 2)][::-1])
-        trust_hash = hashlib.sha3_512((mac_address + self.public_key).encode()).hexdigest()
+        trust_hash = hashlib.sha3_512((str(uuid.uuid1()) + self.public_key).encode()).hexdigest()
         return trust_hash
         
     def fetch_mnemonic(self):
-        response = requests.get(server_ip + '/wallet_list')
-        if response.status_code == 200:
-            return response.json().get('mnemonic')
-        else:
-            print("Failed to fetch mnemonic.")
-            return None
+        list_url = node_dns + '/wallet_list'
+        response = requests.get(list_url)
+        url = response.text.splitlines()[0]
+        second_response = requests.get(url)
+        second_response_lines = second_response.text.splitlines()
+        entropy = secrets.token_bytes(128 // 8)
+        mnemonic = entropy_to_mnemonic(entropy, second_response_lines)
+        return mnemonic
 
     def generate_private_key(self, seed):
         return hashlib.sha3_512(seed).hexdigest()
@@ -61,8 +60,7 @@ class Wallet:
         return short_name + hashlib.sha3_512(private_key.encode('utf-8')).hexdigest()[-hash_length:]
 
     def save_keys(self):
-        url = server_ip+'/wallet_exists'
-        response = requests.post(url, json={'public_key': self.public_key})
+        response = requests.post(node_dns+'/wallet_exists', json={'public_key': self.public_key})
         f_amount = '{:.{}f}'.format(0, decimals)
         if not response.json().get('exists'):
             wallet_data = {
@@ -75,15 +73,14 @@ class Wallet:
                 'amount': f_amount
             }
             trust = tk.Tk()
-            trust.withdraw()  # Hide the main window
-            result = messagebox.askyesno("Trust This Device", f"Do you want to save this computer as a trusted source for {self.public_key}?")
+            trust.withdraw()
+            result = messagebox.askyesno("Trust This Device", f"Do you want to save this computer as a trusted source for:\nWallet Nickname: {self.nickname}\nPublic Wallet Address: {self.public_key}?")
             if result:
                 wallet_data['trust_hash'] = self.trust_hash()
             else:
                 wallet_data['trust_hash'] = False
-            print("Generating wallet...")
-            url = server_ip+'/create_wallet'
-            response = requests.post(url, json=[wallet_data])
+            print(f"WRITE YOUR RECOVERY CODE DOWN!\nThis will only show once!\n\n{self.mnemonic}\n")
+            response = requests.post(node_dns+'/create_wallet', json=[wallet_data])
             if response.status_code == 200:
                 wallet_data.pop('coin_name', None)
                 with open('wallet.json', 'w') as f:
@@ -94,8 +91,7 @@ class Wallet:
 
     def load_keys(self):
         is_trusted = self.trust_hash()
-        url = server_ip+'/get_wallet'
-        response = requests.post(url, json={'public_key': self.public_key, 'trust_hash': is_trusted})
+        response = requests.post(node_dns+'/get_wallet', json={'public_key': self.public_key, 'trust_hash': is_trusted})
         if response.status_code == 200:
             keys = response.json()
             self.private_key = keys['private_key']
@@ -116,12 +112,11 @@ class Wallet:
             print("Failed to load keys from the server.")
 
 def get_blockchain_state():
-    url = server_ip+'/blocks'
-    response = requests.get(url)
+    response = requests.get(node_dns+'/blocks')
     return response.json()
 
 def get_index():
-    response = requests.get(server_ip+'/index')
+    response = requests.get(node_dns+'/index')
     if response.status_code == 200:
         data = response.json()
         index = data['index']
@@ -146,7 +141,7 @@ class BlockchainGUI:
             self.wallet = Wallet(keys['nickname'], keys['amount'])
             self.wallet.private_key = keys['private_key']
             self.wallet.public_key = keys['public_key']
-            response = requests.post(server_ip+'/get_wallet', json={'public_key': self.wallet.public_key})
+            response = requests.post(node_dns+'/get_wallet', json={'public_key': self.wallet.public_key})
             response_keys = response.json()
             if not (self.wallet.public_key == response_keys['public_key']):
                 return print("Fake/non-existent wallet.")
@@ -173,11 +168,10 @@ class BlockchainGUI:
 
     def check_hash_with_server(self):
         global decimals
-        url = server_ip + '/check_client'
         data = {
             'client_hash': self.client_hash
         }
-        response = requests.post(url, json=data)
+        response = requests.post(node_dns+'/check_client', json=data)
         if response.status_code == 200:
             response_json = response.json()
             if 'decimals' in response_json:
@@ -221,7 +215,7 @@ class BlockchainGUI:
 
     def mine(self):
         while self.mining:
-            response = requests.get(server_ip+'/difficulty')
+            response = requests.get(node_dns+'/difficulty')
             if response.status_code == 200:
                 difficulty_response = response.json()
                 difficulty = difficulty_response['difficulty']
@@ -235,7 +229,7 @@ class BlockchainGUI:
                 print("Failed to fetch difficulty.")
                 self.stop_mining()
                 return
-            response = requests.get(server_ip+"/blocks")
+            response = requests.get(node_dns+"/blocks")
             if response.status_code == 200:
                 blocks = response.json()
                 previous_block = blocks[-1]
@@ -275,7 +269,7 @@ class BlockchainGUI:
                 'iterations': iterations
             }
             print("Waiting for consensus...")
-            response = requests.post(server_ip+'/add_block', json=block_data)
+            response = requests.post(node_dns+'/add_block', json=block_data)
             if response.status_code == 200:
                 block_time = datetime.fromtimestamp(int(end_time)).strftime('%m/%d/%Y %H:%M:%S')
                 print(f"Block {new_index} mined at {block_time}!\nMined data: {new_hash}")
