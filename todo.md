@@ -13,7 +13,7 @@
 1. **Encrypt Private Keys**: Implement AES encryption for storing private keys in `wallet.json`.
 2. **Encrypt Blockchain Data**: Implement encryption for storing the blockchain in `blockchain.json` using a secure encryption library like `cryptography`.
 3. **Use HTTPS**: Update the network communication to use HTTPS instead of HTTP.
-4. **Partial Mine Rewards**: Potentially impliment partial PoW iteration confirmation.
+4. **Partial Mine Rewards**: Potentially impliment partial PoW iteration confirmation. *partial
 5. **Input Validation**: Implement input validation checks for transaction amounts and addresses.
 6. **Hierarchical Deterministic Wallets (HD Wallets)**: Implement HD wallets to generate a tree of keys from a single seed.
 7. **Transaction Pool**: Maintain a pool of unconfirmed transactions to be included in future blocks.
