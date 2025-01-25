@@ -1,4 +1,4 @@
-#Author: dotslashCosmic v0.1.1
+# Author: dotslashCosmic v0.1.2
 import hashlib, time, json, requests, os, sys, math, secrets
 from flask import Flask, jsonify, request
 from flask_limiter import Limiter
@@ -14,42 +14,27 @@ coin_name = "zQoin" #Coin full name
 short_name = "zqn" #Coin short name(lowercase/numbers, up to 5 chars)
 client_port = 5317 #int 1-65535
 host_port = 5318 #int 1-65535
-base = 1 #Base difficulty
-max_base = 16 #Maximum difficulty
-logarithmic = float(5) # Float 0-10, higher is faster log growth
-linear = float(4) # Float 0-10, higher is for more linear growth
-ramp_factor = float(0.77) # Float 0-1, lower for slower difficulty ramp-up speed
-max_coin = 10000000 #Maximum amount of coins in circulation, ~462mb per 1m max_coin/reward, ~580 bytes per wallet, ~260 bytes per trust wallet
-reward = 10.00000000 #Base coin reward, float
+base = 64 #Base difficulty
+max_base = 1024 #Maximum difficulty
+logarithmic = float(5) # Float 0-10, +log growth
+linear = float(4) # Float 0-10, +linear growth
+ramp_factor = 0.77 # Float 0-1, lower for slower difficulty ramp-up speed
+max_coin = 7777777777 #Maximum amount of coins in circulation, ~462mb per 1m max_coin/reward, ~580 bytes per wallet, ~260 bytes per trust wallet
+reward = 100.0000000 #Base coin reward, float
+winner_percent = 50.0 #How much in percent the winner gets of the reward, 0-100, float
 decimals = 8 #Maximum trailing decimals for reward, int 0-8, absolute limit of 8
-time_between_rewards = 1 #Minimum seconds between blocks, int
+time_between_rewards = 10 #Minimum seconds between blocks, int
 consensus_count = 1 #Minimum verifications for consensus per node
 node_consensus = 1 #Minimum nodes for consensus verification
 node_tolerance = 0 #Tolerance for faulty nodes
 wallet_list_url = "https://raw.githubusercontent.com/dotslashCosmic/zQoinPython/main/wordlist/en.txt" #Wallet creation word list
 host_version_url = "https://raw.githubusercontent.com/dotslashCosmic/zQoinPython/main/hash/host.sha3_512" #SHA3-512 of this file
-check = True #Bool, validate host/client with host_version_url/client_version
+check = False #Bool, validate host/client with host_version_url/client_version
 local = True #Bool, allows local IPs
 node_dns = 'localhost' # DNS resolve to nodes list, in progress
 client_version = "483dd03d96b4cc769f0aa6c31dce2c3ecdfb1f67189405586a1572f44e5a3fb0e17ba897c135540e9efb9d9d6a3c1310faeee536acc316b0ef43894d064acfd4" #SHA3-512 of client.py
-genesis_token = f'{client_version}{coin_name}GENESIS' #Genesis block
+genesis_token = f'{client_version}{host_version_url}{coin_name}GENESIS' #Genesis block
 consensus_results = defaultdict(list) #Initialize
-
-def create_genesis_block():
-    index, previous_hash = 0, 0
-    timestamp = int(time.time())
-    nonce = int.from_bytes(os.urandom(8), 'big')
-    genesis = hashlib.sha3_512((str(timestamp)+str(nonce)+genesis_token).encode()).hexdigest()
-    hash = hashlib.sha3_512((str(index)+str(previous_hash)+str(timestamp)+str(nonce)).encode('utf-8')).hexdigest()
-    request = json.dumps({
-        'index': index,
-        'previous_hash': previous_hash,
-        'timestamp': timestamp,
-        'genesis': genesis,
-        'hash': hash,
-        'nonce': nonce
-    })
-    return Block(index, previous_hash, timestamp, genesis, hash, nonce)
 
 def bootup(__file__, check, host_version_url, coin_name, client_port, host_port, logarithmic, linear, ramp_factor, reward, decimals, short_name, time_between_rewards, consensus_count, base, max_base):
     with open(__file__, 'rb') as file:
@@ -116,6 +101,10 @@ def bootup(__file__, check, host_version_url, coin_name, client_port, host_port,
     if not isinstance(time_between_rewards, int) or time_between_rewards < 1:
         print(f"'time_between_rewards' must be an integer and at least 1. Current value: {time_between_rewards}")
         sys.exit(1)
+    #check to make sure winner_percent is 0-100, no negative, float
+    if not isinstance(winner_percent, float) or winner_percent < 0 or winner_percent > 100:
+        print(f"'winner_percent' must be a float between 0 and 100.")
+        sys.exit(1)
     if time_between_rewards > 360:
         print(f"Warning! 'time_between_rewards' is very large ({time_between_rewards}) seconds. Consider using a smaller value.")
     if not isinstance(consensus_count, int) or consensus_count < 1:
@@ -126,33 +115,46 @@ def bootup(__file__, check, host_version_url, coin_name, client_port, host_port,
     if not isinstance(base, int) or base < 1:
         print(f"'base' must be an integer and at least 1. Current value: {base}")
         sys.exit(1)
-    if base > 10:
+    if base > 64:
         print(f"Warning! 'base' is very large to start ({base}).")
     if not isinstance(max_base, int) or max_base < 1:
         print(f"'max_base' must be an integer and at least 1. Current value: {max_base}")
         sys.exit(1)
-    if max_base > 50:
+    if max_base > 512:
         print(f"Warning: 'max_base' is very large ({max_base}).")
-    next_node_id = PBFTNode(0, NodeRole.PRIMARY, node_dns).available_node()
+    next_node_id = PBFT(0, Role.NODE, node_dns).available_node()
     if next_node_id is not None:
-        nodes = [PBFTNode(next_node_id, NodeRole.PRIMARY if next_node_id == 0 else NodeRole.REPLICA, node_dns)]
-        role = "PRIMARY" if nodes[0].role == NodeRole.PRIMARY else f"REPLICA {nodes[0].node_id}"
+        nodes = [PBFT(next_node_id, Role.NODE if next_node_id == 0 else Role.NODE, node_dns)]
+        role = 1 if nodes[0].role == Role.NODE else f"NODE {nodes[0].node_id}"
         print(f"Node {role}")
     else:
         print("Failed to initialize P2P node connection.")
         sys.exit(1)
 
-class NodeRole(Enum):
-    PRIMARY = 1
-    REPLICA = 2
+def create_genesis_block():
+    index = 0
+    timestamp = int(time.time())
+    nonce = int.from_bytes(os.urandom(8), 'big')
+    genesis = hashlib.sha3_512((str(timestamp)+str(nonce)+genesis_token).encode()).hexdigest()
+    hash_ = hashlib.sha3_512((str(index)+str(timestamp)+str(nonce)).encode('utf-8')).hexdigest()
+    request = json.dumps({
+        'i': index,
+        't': timestamp,
+        'g': genesis,
+        'n': nonce
+    })
+    return Block(index, timestamp, genesis, nonce)
 
-class PBFTType(Enum):
+class Role(Enum):
+    NODE = 1
+
+class Type(Enum):
     PRE_PREPARE = 1
     PREPARE = 2
     COMMIT = 3
     REPLY = 4
 
-class PBFTMessage:
+class Msg:
     def __init__(self, msg_type, view, seq_num, digest, node_id):
         self.msg_type = msg_type
         self.view = view
@@ -160,7 +162,7 @@ class PBFTMessage:
         self.digest = digest
         self.node_id = node_id
 
-class PBFTNode:
+class PBFT:
     def __init__(self, node_id, role, node_dns):
         self.node_id = node_id
         self.role = role
@@ -193,7 +195,7 @@ class PBFTNode:
         for node in nodes:
             if node.node_id != self.node_id:
                 url = 'http://'+self.node_resolve+':'+str(host_port)+'/node_alert'
-                print(f"ALERT! ")
+                print(f"ALERT! {alert_msg}")
                 requests.post(url, json=alert_msg)
         
     def send_all(self, msg):
@@ -203,25 +205,25 @@ class PBFTNode:
                 requests.post(url, json=msg.__dict__)
 
     def receive_message(self, msg):
-        msg = PBFTMessage(**msg)
-        if msg.msg_type == PBFTType.PRE_PREPARE:
+        msg = Msg(**msg)
+        if msg.msg_type == Type.PRE_PREPARE:
             self.prepare(msg)
-        elif msg.msg_type == PBFTType.PREPARE:
+        elif msg.msg_type == Type.PREPARE:
             self.commit(msg)
-        elif msg.msg_type == PBFTType.COMMIT:
+        elif msg.msg_type == Type.COMMIT:
             self.reply(msg)
 
     def pre_prepare(self, request):
-        if self.role == NodeRole.PRIMARY:
+        if self.role == Role.NODE:
             self.seq_num += 1
             digest = hashlib.sha3_512(request.encode()).hexdigest()
-            msg = PBFTMessage(PBFTType.PRE_PREPARE, self.view, self.seq_num, digest, self.node_id)
+            msg = Msg(Type.PRE_PREPARE, self.view, self.seq_num, digest, self.node_id)
             self.message_log.append(msg)
             print(f"Pre-prepare result: {msg}")
             self.send_all(msg)
 
     def prepare(self, msg):
-        if self.role == NodeRole.REPLICA:
+        if self.role == Role.NODE:
             self.message_log.append(msg)
             self.prepared_messages[msg.seq_num].append(msg)
             if len(self.prepared_messages[msg.seq_num]) >= 2 * f:
@@ -268,7 +270,7 @@ class PBFTNode:
 
     def synchronize_blockchains(self):
         last_blocks = blockchain.chain[-5:]
-        last_hashes = [block.hash for block in last_blocks]
+        last_hashes = [block.hash_ for block in last_blocks]
         self.send_all({'type': 'SYNC', 'hashes': last_hashes})
         responses = []
         for node in nodes:
@@ -283,13 +285,11 @@ class PBFTNode:
             print("Nodes do not agree on the last two hashes.")
 
 class Block:
-    def __init__(self, index, previous_hash, timestamp, data, hash, nonce):
+    def __init__(self, index, timestamp, data, nonce):
         self.index = index
         cur_index = self.index
-        self.previous_hash = previous_hash
         self.timestamp = timestamp
         self.data = data
-        self.hash = hash
         self.nonce = nonce
 
 class Blockchain:
@@ -309,12 +309,10 @@ class Blockchain:
             for block in self.chain:
                 if block.index not in seen_indexes:
                     block_data = {
-                        "index": block.index,
-                        "timestamp": block.timestamp,
-                        "previous_hash": block.previous_hash,
-                        "data": block.data,
-                        "hash": block.hash,
-                        "nonce": block.nonce,
+                        "i": block.index,
+                        "t": block.timestamp,
+                        "d": block.data,
+                        "n": block.nonce,
                     }
                     chain_data.append(block_data)
                     seen_indexes.add(block.index)
@@ -325,12 +323,10 @@ class Blockchain:
             with open('blockchain.json', 'r') as f:
                 data = json.load(f)
                 self.chain = [Block(
-                    block['index'],
-                    block['timestamp'],
-                    block['previous_hash'],
-                    block.get('data', genesis_token),
-                    block['hash'],
-                    block['nonce'],
+                    block['i'],
+                    block['t'],
+                    block.get('d'),
+                    block['n'],
                 ) for block in data['chain']]
                 self.balances = data['balances']
         except FileNotFoundError:
@@ -366,6 +362,9 @@ class Blockchain:
 
     def get_latest_index(self):
         return self.get_latest_block().index
+    
+    def get_latest_hash(self):
+        return self.get_latest_block().data
         
     def nonce_chain(self):
         try:
@@ -408,18 +407,32 @@ def get_blocks():
         seen_hashes = set()
         last_blocks = blockchain.chain[-10:]
         for block in last_blocks:
-            if block.hash not in seen_hashes:
+            if block.hash_ not in seen_hashes:
                 chain_data.append({
-                    "index": block.index,
-                    "timestamp": block.timestamp,
-                    "hash": block.hash
+                    "i": block.index,
+                    "t": block.timestamp,
+                    "h": block.hash_
                 })
-                seen_hashes.add(block.hash)
+                seen_hashes.add(block.hash_)
         return jsonify(chain_data), 200
     except Exception as e:
         print(f"Error: {e}")
         return jsonify({'error': 'Cannot get blocks.'}), 500
-    
+
+@app.route('/latest_block', methods=['GET'])
+@limiter.limit("2 per second")
+def latest_block():
+    latest_block = blockchain.get_latest_block()
+    #get the newest 'd' in the blockchain according to the 't' timestamp
+    block_data = {
+        "i": latest_block.index,
+        "t": latest_block.timestamp,
+        "d": latest_block.data,
+        "h": blockchain.get_latest_hash(),
+        "n": latest_block.nonce,
+    }
+    return jsonify(block_data), 200
+
 last_reward_time = time.time()
 @app.route('/add_block', methods=['POST'])
 @limiter.limit(f"2 per second")
@@ -433,25 +446,34 @@ def add_block():
             while time.time() - difficulty_time < time_between_rewards:
                 time.sleep(time_between_rewards)
         block_data = request.json
-        data = block_data['last_hashes']
-        received_nonce = block_data['new_nonce']
-        new_hash = block_data['new_hash']
-        new_transactions = block_data['new_transactions']
-        miner = block_data['miner']
-        first_hash = data.split('[')[0]
-        old_hash = blockchain.get_latest_block().hash
+        print("Block data, find the new nonce ", block_data)
+        if 'last_hashes' in block_data:
+            data = block_data['last_hashes']
+        else:
+            data = []  # or handle it as needed for the first block
+        if 'nonce' in block_data:
+            nonce = block_data['nonce']
+        else:
+            nonce = []  # or handle it as needed for the first block
+        if 'new_hash' in block_data:
+            new_hash = block_data['new_hash']
+        else:
+            new_hash = []  # or handle it as needed for the first block
+        if 'miner' in block_data and isinstance(block_data['miner'], str):
+            miner = block_data['miner']
+        else:
+            return jsonify({"message": "Invalid or missing miner."}), 400
+        if data:
+            first_hash = data.split('[')[0]
+        else:
+            first_hash = ""
         previous_block = blockchain.get_latest_block()
         index = previous_block.index + 1
-        hash_rate = block_data['hash_rate']
-        iterations = block_data['iterations']
         timestamp = int(time.time())
-        previous_hash = previous_block.hash
         result = {
-        'data': data,
-        'received_nonce': received_nonce,
+        'nonce': nonce,
         'new_hash': new_hash,
-        'first_hash': first_hash,
-        'iterations': block_data['iterations']}
+        'first_hash': first_hash}
         if index not in consensus_results:
             consensus_results[index] = {}
         if miner not in consensus_results[index]:
@@ -468,23 +490,32 @@ def add_block():
                     matching_results.append(result)
         if len(matching_results) >= consensus_count:
             if time.time() - last_reward_time >= time_between_rewards:
-                received_nonce + 1
-                new_block = Block(index, previous_hash, timestamp, hashlib.sha3_512(data.encode('utf-8')).hexdigest(), new_hash, received_nonce)
-                blockchain.chain.append(new_block)
-                blockchain.save_chain()
+                if not nonce:
+                    nonce = 1
+                data_hash = hashlib.sha3_512(''.join(data).encode('utf-8')).hexdigest()
+                new_hash = block_data['d']
+                #apply vars new_hash and new_nonce in the chain to be 'd' and 'n'
                 if limit == True:
-                    reward_per_miner = float(0)
+                    winner_reward = float(0)
+                    miner_reward = float(0)
                 elif limit == False:
-                    total_effort = sum(result['iterations'] for result in matching_results)
-                    reward_per_miner = float(f"{(reward * result['iterations'] / total_effort):.{decimals}f}")
-                block_data.pop('iterations', None)
-                print(f"Block {index} mined: {new_hash}\nReward per miner: {reward_per_miner:.{decimals}f} {coin_name}")
+                    miner_reward = float((reward * (1 - (winner_percent / 100))) / consensus_count)
+                    winner_reward = float(reward * (winner_percent / 100))
+                    winning_wallet = block_data['miner']
+                print(f"Block {index} mined: {new_hash}\nReward for each of {consensus_count} miners: {miner_reward:.{decimals}f} {coin_name}\nBonus for winner {winner_reward:.{decimals}f} {coin_name}")
                 for address, result in consensus_results[index].items():
+# properly send winner_reward to the winner instead of a standard miner_reward share, or add the bonus to just winner
+#                    updatewinner = {
+#                        'message': "approved",
+#                        'address': winning_wallet,
+#                        'decimals': decimals,
+#                        'amount': winner_reward
+#                    }
                     update = {
                         'message': "approved",
                         'address': address,
                         'decimals': decimals,
-                        'amount': float(f"{reward_per_miner:.{decimals}f}")
+                        'amount': float(f"{miner_reward:.{decimals}f}")
                     }
                     miner_ip = request.remote_addr
                     try:
@@ -504,17 +535,22 @@ def add_block():
                     except ValueError as e:
                         print(f"Bad IP: {miner_ip}\nBad Port: {client_port}\nError {e}")
                         return jsonify({"message": "Invalid IP address."}), 400
-                    print(f"Sent {reward_per_miner} to {address}, response status: {response.status_code}")
+                    print(f"Sent {miner_reward} to {address}, response status: {response.status_code}")
                     if response.status_code == 200:
                         with open('hostwallet.json', 'r') as f:
                             host_wallets = json.load(f)
                         for wallet in host_wallets:
                             if wallet['public_key'] == address:
-                                wallet['amount'] = float(wallet['amount']) + float(reward_per_miner)
+                                wallet['amount'] = float(wallet['amount']) + float(miner_reward)
                                 wallet['amount'] = f"{wallet['amount']:.{decimals}f}"
                                 break
                         with open('hostwallet.json', 'w') as f:
                             json.dump(host_wallets, f, indent=4)
+                new_block = Block(index, timestamp, new_hash, nonce)
+                new_block.nonce = nonce
+                new_block.new_hash = new_hash
+                blockchain.chain.append(new_block)
+                blockchain.save_chain()
                 del consensus_results[index]
                 last_reward_time = time.time()
                 new_index = index + 1
@@ -530,23 +566,9 @@ def add_block():
     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, requests.exceptions.HTTPError) as e:
         print(f"Error: {e}")
         return jsonify({"message": "Block declined due to connection error."}), 400
-        
-@app.route('/latest_block', methods=['GET'])
-@limiter.limit("2 per second")
-def latest_block():
-    latest_block = blockchain.get_latest_block()
-    block_data = {
-        "index": latest_block.index,
-        "timestamp": latest_block.timestamp,
-        "previous_hash": latest_block.previous_hash,
-        "data": latest_block.data,
-        "hash": latest_block.hash,
-        "nonce": latest_block.nonce,
-    }
-    return jsonify(block_data), 200
     
 @app.route('/check_client', methods=['POST'])
-@limiter.limit("12 per minute")
+@limiter.limit("1 per second")
 def check_client():
     data = request.get_json()
     if check == False:
@@ -582,7 +604,7 @@ def wallet_exists():
 def get_wallet():
     data = request.get_json()
     public_key = data.get('public_key')
-    trust_hash = data.get('is_trusted')
+    trust_hash = data.get('trust_hash')
     if check == True:
         if os.path.exists('trustwallet.json'):
             with open('trustwallet.json', 'r') as f:
@@ -592,7 +614,7 @@ def get_wallet():
         for wallet in wallets:
             if wallet['public_key'] == public_key:
                 for trust_wallet in trust_wallets:
-                    if trust_wallet['public_key'] == public_key and trust_wallet['is_trusted'] == trust_hash:
+                    if trust_wallet['public_key'] == public_key and trust_wallet['trust_hash'] == trust_hash:
                         return jsonify({
                             'public_key': wallet['public_key'],
                             'amount': float(wallet['amount'])
@@ -659,7 +681,7 @@ def create_wallet():
                 json.dump(wallets, f, indent=4)
         return jsonify({'message': f'Wallet {public_key} created!'}), 200
     else:
-        print(f"Malformed wallet: Public_key: {public_key}\nnickname: {nickname}\namount: {amount}")
+        print(f"Malformed wallet: Public_key: {public_key}\nnickname: {nickname}\namount: {formatted_amount}")
         return jsonify({'error': 'Invalid data format.'}), 400
 
 @app.route('/add_amount', methods=['POST'])
@@ -683,7 +705,7 @@ def add_amount():
         return jsonify({'message': f'Error adding {amount} to {public_key}'}), 500
 
 @app.route('/wallet_list', methods=['GET'])
-@limiter.limit("12 per minute")
+@limiter.limit("1 per second")
 def wallet_list():
     response = requests.get(wallet_list_url)
     if response.status_code == 200:
@@ -691,7 +713,6 @@ def wallet_list():
     else:
         print(f"Response: {response}")
         return jsonify({'w': 'Failed to fetch wallet list.'}), 500
-
 
 @app.route('/node_receive', methods=['POST'])
 def receive_message():
@@ -723,7 +744,7 @@ def client_request():
         print(f"Faulty node detected. {request_str}")
         return jsonify({'status': 'Error', 'message': 'Faulty node detected.'}), 400
     nodes[0].pre_prepare(request_str)
-    return jsonify({'status': 'Request sent to primary.'}), 200
+    return jsonify({'status': 'Request sent to consensus.'}), 200
 
 next_node_val = 0
 @app.route('/next_node', methods=['POST'])
@@ -733,13 +754,14 @@ def next_node():
     available_nodes = data.get('node_id')
     time.sleep(1)
     #TODO Almost implimented, available_nodes doesnt consolidate
+    #among what, across connections of node_dns?
     if available_nodes == 0 and next_node_val == 0:
         next_node_val = 1
-        print(f"Starting first REPLICA node {next_node_val}")
+        print(f"Starting first NODE node {next_node_val}")
         return jsonify({'next_node': int(next_node_val)}), 200
     else:
         next_node_val += 1
-        print(f"Starting REPLICA node {next_node_val}")
+        print(f"Starting NODE node {next_node_val}")
         return jsonify({'next_node': int(next_node_val)}), 200
 
 @app.route('/node_sync', methods=['POST'])
@@ -748,7 +770,7 @@ def node_sync():
     node_id = data['node_id']
     received_hashes = data['hashes']
     last_blocks = blockchain.chain[-5:]
-    last_hashes = [block.hash for block in last_blocks]
+    last_hashes = [block.hash_ for block in last_blocks]
     if received_hashes == last_hashes:
         return jsonify({'status': 'success', 'hashes': last_hashes}), 200
     else:
