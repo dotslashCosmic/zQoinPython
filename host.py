@@ -32,7 +32,7 @@ host_version_url = "https://raw.githubusercontent.com/dotslashCosmic/zQoinPython
 check = False #Bool, validate host/client with host_version_url/client_version
 local = True #Bool, allows local IPs
 node_dns = 'localhost' # DNS resolve to nodes list, in progress
-client_version = "483dd03d96b4cc769f0aa6c31dce2c3ecdfb1f67189405586a1572f44e5a3fb0e17ba897c135540e9efb9d9d6a3c1310faeee536acc316b0ef43894d064acfd4" #SHA3-512 of client.py
+client_version = "b12bee9a69ac0ff8a0ed4ae134b7009d4674713244f3e455224182dac33a494d1b4857217fc5b51da5c4d95c473471203bbf4d918ee958b606be9c916458270d" #SHA3-512 of client.py
 genesis_token = f'{client_version}{host_version_url}{coin_name}GENESIS' #Genesis block
 consensus_results = defaultdict(list) #Initialize
 
